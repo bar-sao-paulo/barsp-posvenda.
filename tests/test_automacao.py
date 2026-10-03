@@ -355,3 +355,9 @@ def test_pagina_respostas_e_envio_manual(app_wa, engine):
     assert wa.textos == [(JOAO, "Oi, João! Desculpa.")] and _resposta(engine).status == respostas.RESPONDIDO
     csv = c.get("/respostas/planilha.csv?data=2026-10-02")
     assert csv.status_code == 200 and "Gravidade" in csv.get_data(as_text=True)
+
+
+def test_privacidade_e_publica(app_wa):
+    app, _ = app_wa
+    r = app.test_client().get("/privacidade")
+    assert r.status_code == 200 and "PARAR" in r.get_data(as_text=True)

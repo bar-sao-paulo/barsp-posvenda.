@@ -104,7 +104,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             enviado = request.form.get("csrf") or request.headers.get("X-CSRF", "")
             if not hmac.compare_digest(enviado, session["csrf"]):
                 abort(400)
-        if request.endpoint in ("entrar", "saude", "static"):
+        if request.endpoint in ("entrar", "saude", "static", "privacidade"):
             return None
         if not session.get("usuario"):
             return redirect(url_for("entrar", proximo=request.full_path))
@@ -123,6 +123,10 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     @app.get("/saude")
     def saude():
         return "ok"
+
+    @app.get("/privacidade")
+    def privacidade():
+        return render_template("privacidade.html")
 
     @app.route("/entrar", methods=["GET", "POST"])
     def entrar():
@@ -408,6 +412,23 @@ function abrir(id, tel) {
 <table><tr><th>Quando</th><th>Telefone</th><th>Mensagem</th></tr>{% for m in fora %}<tr><td>{{ m.quando }}</td>
 <td>{{ mascarar(m.telefone) }}</td><td>{{ m.texto }}</td></tr>{% endfor %}</table></div>{% endif %}
 {% endblock %}""",
+
+    "privacidade.html": """{% extends 'base.html' %}{% block corpo %}<div class="card">
+<h2 style="margin-top:0">Política de privacidade da pesquisa de satisfação</h2>
+<p>Bar São Paulo (CNPJ 54.615.219/0001-24).</p>
+<p><b>O que usamos.</b> Depois da sua visita ou do seu pedido no delivery, usamos o primeiro nome, o telefone e o prato
+registrados no nosso sistema de vendas para mandar uma pesquisa de satisfação pelo WhatsApp. Guardamos a sua resposta
+para melhorar o atendimento.</p>
+<p><b>Para quê.</b> Só para saber como foi a sua experiência e responder você. Não usamos esses dados para propaganda
+e não vendemos nem cedemos para ninguém.</p>
+<p><b>Quem mais vê.</b> A mensagem passa pelo WhatsApp (Meta). Para organizar as respostas, o texto que você escreve
+é lido por uma ferramenta de inteligência artificial (Claude, da Anthropic), e uma pessoa da nossa equipe revisa as
+respostas mais importantes.</p>
+<p><b>Por quanto tempo.</b> Mandamos no máximo uma pesquisa por semana. Os dados ficam guardados no servidor do nosso
+painel de pós-venda enquanto forem úteis para o atendimento.</p>
+<p><b>Não quer receber?</b> Responda PARAR na conversa e você não recebe mais. Para pedir que apaguemos seus dados ou
+tirar dúvidas, fale com a gente pelo mesmo WhatsApp.</p>
+</div>{% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
 <p class="quieto">Quem está aqui nunca entra na lista do envio.</p>
