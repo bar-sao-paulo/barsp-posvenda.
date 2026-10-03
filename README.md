@@ -19,6 +19,20 @@ cliente. A Thais toca em "Abrir no WhatsApp", envia e volta para o próximo.
 
 O telefone completo só aparece no link do WhatsApp e no CSV; na tela fica mascarado.
 
+## Etapa 2: WhatsApp automático (número novo na API oficial da Meta)
+
+- **Envio:** com o WhatsApp configurado, a página Envio ganha "Enviar agora pelo WhatsApp". Com
+  `ENVIO_AUTOMATICO=1`, o painel faz sozinho, todo dia a partir de `ENVIO_HORA` (padrão 11h): busca a lista de
+  ontem e manda a pesquisa com os modelos aprovados (`pesquisa_a/b/c`, `{{1}}` = nome, `{{2}}` = prato). Uma vez
+  por dia; quem pediu PARAR é pulado.
+- **Respostas:** chegam pelo webhook `/webhook/whatsapp` (assinado pela Meta). Ficam ligadas ao cliente pelo
+  telefone; o resto vai para "Fora da lista". "PARAR" tira o número da pesquisa e confirma ao cliente.
+- **Análise:** 10 minutos depois da última mensagem do cliente, o Claude sugere nota, gravidade, resumo, resposta e
+  ação. A página **Respostas** mostra da mais crítica para a menos crítica e baixa a planilha (CSV).
+- **Quem responde:** 🔴 e tudo que tiver algum alerta (compensação, vocabulário proibido, falha da IA) fica em
+  "Revisar antes de enviar" e avisa por e-mail. Com `RESPOSTA_AUTOMATICA=1`, só as sem alerta saem sozinhas.
+  O WhatsApp só aceita texto livre até 24 h depois da última mensagem do cliente.
+
 ## Railway
 
 Serviço web: `railway.json` → `gunicorn 'posvenda.web:criar_app()'`, verificação em `/saude`.
@@ -33,6 +47,14 @@ Variáveis (só nomes; os valores ficam no Railway):
 | `TAKEAT_BASE_URL` | Opcional; padrão `https://public-api.takeat.app` |
 | `SECRET_KEY` | Texto aleatório longo (mantém o login entre reinícios) |
 | `LOGIN_USUARIO`, `LOGIN_SENHA` | Acesso ao painel |
+| `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | Token do usuário do sistema e ID do número (Meta) |
+| `WHATSAPP_APP_SECRET` | Chave secreta do app da Meta (confere a assinatura do webhook) |
+| `WHATSAPP_VERIFY_TOKEN` | Texto que você inventa e repete na tela do webhook da Meta |
+| `WHATSAPP_MODELO_A/B/C` | Opcional; nomes dos modelos (padrão `pesquisa_a`, `pesquisa_b`, `pesquisa_c`) |
+| `ANTHROPIC_API_KEY` | Chave da API do Claude (análise das respostas) |
+| `ENVIO_AUTOMATICO`, `ENVIO_HORA` | `1` liga o envio diário; hora de São Paulo (padrão 11) |
+| `RESPOSTA_AUTOMATICA` | `1` deixa sair sozinha a resposta sem nenhum alerta (🔴 nunca sai) |
+| `ALERTA_EMAIL`, `RESEND_API_KEY`, `EMAIL_FROM`, `PAINEL_URL` | Opcionais; aviso por e-mail de crítica |
 
 ## Testes
 

@@ -1,7 +1,10 @@
-"""Painel do pós-venda (celular): lista do dia com os links do WhatsApp e quem não quer receber.
+"""Painel do pós-venda (celular): lista do dia, envio pelo WhatsApp, respostas e quem não quer receber.
 
 Rodar no Railway: gunicorn "posvenda.web:criar_app()" --bind 0.0.0.0:$PORT
 Variáveis: DATABASE_URL, TAKEAT_API_KEY, TAKEAT_BASE_URL (opcional), SECRET_KEY, LOGIN_USUARIO, LOGIN_SENHA.
+Etapa 2 (opcionais): WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN,
+WHATSAPP_API_VERSION, WHATSAPP_MODELO_A/B/C, ANTHROPIC_API_KEY, ENVIO_AUTOMATICO, ENVIO_HORA, RESPOSTA_AUTOMATICA,
+ALERTA_EMAIL, RESEND_API_KEY, EMAIL_FROM, PAINEL_URL.
 """
 from __future__ import annotations
 
@@ -9,15 +12,16 @@ import hmac
 import logging
 import os
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 from jinja2 import DictLoader
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import lista, servico
+from . import automacao, lista, respostas, servico
 from .db import criar_engine
 from .takeat import TakeatClient, TakeatError
+from .whatsapp import WhatsApp, WhatsAppErro, assinatura_valida, ler_webhook
 
 log = logging.getLogger("posvenda.web")
 
@@ -31,8 +35,34 @@ def _buscar_takeat():
     return cliente.listar_sessoes
 
 
+def _whatsapp():
+    token, numero = os.environ.get("WHATSAPP_TOKEN"), os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
+    if not token or not numero:
+        return None
+    return WhatsApp(token, numero, versao=os.environ.get("WHATSAPP_API_VERSION", "v23.0"))
+
+
+def _classificador():
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    from .ia import Classificador
+    return Classificador()
+
+
+def _alerta():
+    destino, chave, remetente = (os.environ.get(x) for x in ("ALERTA_EMAIL", "RESEND_API_KEY", "EMAIL_FROM"))
+    if not (destino and chave and remetente):
+        return None
+    return automacao.alerta_por_email(destino, chave, remetente, os.environ.get("PAINEL_URL", ""))
+
+
+_PADRAO = object()
+
+
 def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senha: str | None = None,
-              hoje=servico.hoje_local) -> Flask:
+              hoje=servico.hoje_local, whatsapp=_PADRAO, classificar=_PADRAO, app_secret: str | None = None,
+              verify_token: str | None = None, config: automacao.Config | None = None,
+              agendador: bool | None = None) -> Flask:
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     chave = os.environ.get("SECRET_KEY")
@@ -42,20 +72,39 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                       PERMANENT_SESSION_LIFETIME=timedelta(days=30))
     app.jinja_loader = DictLoader(TEMPLATES)
+    producao = engine is None
     engine = engine or criar_engine()
     buscar = buscar_sessoes if buscar_sessoes is not None else _buscar_takeat()
     login_usuario = usuario if usuario is not None else os.environ.get("LOGIN_USUARIO", "")
     login_senha = senha if senha is not None else os.environ.get("LOGIN_SENHA", "")
+    wa = _whatsapp() if whatsapp is _PADRAO else whatsapp
+    classificador = _classificador() if classificar is _PADRAO else classificar
+    segredo_app = app_secret if app_secret is not None else os.environ.get("WHATSAPP_APP_SECRET", "")
+    token_verificacao = verify_token if verify_token is not None else os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
+    cfg = config or automacao.Config.do_ambiente()
+    # O agendador só liga no Railway (criar_app() sem argumentos); nos testes fica desligado.
+    if agendador if agendador is not None else producao:
+        automacao.iniciar_agendador(engine, cfg, buscar=buscar, whatsapp=wa, classificar=classificador,
+                                    alertar=_alerta())
+    app.config["POSVENDA_CFG"] = cfg
+
+    def _bloquear(telefone: str) -> None:
+        d = "".join(c for c in telefone if c.isdigit())
+        if len(d) == 12 and d.startswith("55"):  # WhatsApp às vezes manda o celular sem o 9
+            d = d[:4] + "9" + d[4:]
+        servico.bloquear(engine, d, "Respondeu PARAR no WhatsApp")
 
     @app.before_request
     def _csrf_e_login():
+        if request.endpoint in ("webhook_verificar", "webhook_receber"):
+            return None  # chamado pela Meta: protegido pela assinatura, sem login nem CSRF
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
         if request.method == "POST":
             enviado = request.form.get("csrf") or request.headers.get("X-CSRF", "")
             if not hmac.compare_digest(enviado, session["csrf"]):
                 abort(400)
-        if request.endpoint in ("entrar", "saude", "static"):
+        if request.endpoint in ("entrar", "saude", "static", "privacidade"):
             return None
         if not session.get("usuario"):
             return redirect(url_for("entrar", proximo=request.full_path))
@@ -74,6 +123,10 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     @app.get("/saude")
     def saude():
         return "ok"
+
+    @app.get("/privacidade")
+    def privacidade():
+        return render_template("privacidade.html")
 
     @app.route("/entrar", methods=["GET", "POST"])
     def entrar():
@@ -113,9 +166,11 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         motivos: dict[str, int] = {}
         for n in dados.nao_enviados:
             motivos[n["motivo"]] = motivos.get(n["motivo"], 0) + 1
+        pendentes = sum(1 for e in dados.envios if e["enviado_em"] is None)
         return render_template("envio.html", dados=dados, dia=dia, hoje=hoje(), motivos=motivos,
                                mascarar=lista.mascarar, takeat_ok=buscar is not None, timedelta=timedelta,
-                               tz=lista.TZ)
+                               tz=lista.TZ, wa_ok=wa is not None, pendentes=pendentes, cfg=cfg,
+                               rotina=automacao.ultima_rotina(engine, "envio:"))
 
     @app.post("/envio/buscar")
     def envio_buscar():
@@ -131,6 +186,17 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             except TakeatError as exc:
                 log.warning("Falha ao buscar o Takeat: %s", exc)
                 flash(f"Não consegui buscar a lista no Takeat: {exc}")
+        return redirect(url_for("envio", data=dia.isoformat()))
+
+    @app.post("/envio/whatsapp")
+    def envio_whatsapp():
+        dia = _dia_da_url()
+        if wa is None:
+            flash("WhatsApp não configurado no Railway (WHATSAPP_TOKEN e WHATSAPP_PHONE_NUMBER_ID).")
+        else:
+            res = automacao.enviar_dia(engine, dia, wa.enviar_modelo, cfg.modelos)
+            flash(f"Pesquisa pelo WhatsApp: {res.resumo}."
+                  + (f" Primeiro erro: {res.erros[0]}" if res.erros else ""))
         return redirect(url_for("envio", data=dia.isoformat()))
 
     @app.post("/envio/<int:envio_id>/enviado")
@@ -164,6 +230,80 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             return redirect(url_for("nao_enviar"))
         return render_template("nao_enviar.html", bloqueios=servico.listar_bloqueios(engine), mascarar=lista.mascarar)
 
+    # ----------------------------------------------------------------------- webhook do WhatsApp (Meta)
+    @app.get("/webhook/whatsapp")
+    def webhook_verificar():
+        if (request.args.get("hub.mode") == "subscribe" and token_verificacao
+                and hmac.compare_digest(request.args.get("hub.verify_token", ""), token_verificacao)):
+            return request.args.get("hub.challenge", "")
+        abort(403)
+
+    @app.post("/webhook/whatsapp")
+    def webhook_receber():
+        corpo = request.get_data()
+        if not assinatura_valida(segredo_app, corpo, request.headers.get("X-Hub-Signature-256")):
+            abort(403)
+        recebidas, situacoes = ler_webhook(request.get_json(silent=True) or {})
+        for m in recebidas:
+            try:
+                respostas.registrar_recebida(engine, m.telefone, m.texto, m.wa_id, m.quando,
+                                             enviar_texto=wa.enviar_texto if wa else None, bloquear=_bloquear)
+            except Exception:
+                log.exception("Falha ao gravar mensagem recebida")
+        for st in situacoes:
+            try:
+                respostas.atualizar_situacao(engine, st.wa_id, st.status, st.erro)
+            except Exception:
+                log.exception("Falha ao gravar situação do envio")
+        return "ok"
+
+    # ----------------------------------------------------------------------- respostas (planilha do dia)
+    @app.get("/respostas")
+    def respostas_pagina():
+        dia = _dia_da_url()
+        rows = respostas.listar(engine, dia, dia)
+        inicio = datetime.combine(dia + timedelta(days=1), time(), lista.TZ)
+        fora = respostas.fora_da_lista(engine, inicio, inicio + timedelta(days=2))
+        for m in fora:
+            q = m["criado_em"]
+            m["quando"] = (q if q.tzinfo else q.replace(tzinfo=timezone.utc)).astimezone(lista.TZ).strftime("%d/%m %H:%M")
+        return render_template("respostas.html", rows=rows, dia=dia, hoje=hoje(), timedelta=timedelta,
+                               contagem=respostas.contagem(rows), fora=fora, mascarar=lista.mascarar,
+                               wa_ok=wa is not None, ia_ok=classificador is not None, R=respostas, tz=lista.TZ)
+
+    @app.post("/respostas/<int:resposta_id>/enviar")
+    def respostas_enviar(resposta_id: int):
+        if wa is None:
+            flash("WhatsApp não configurado no Railway.")
+        else:
+            try:
+                respostas.enviar_resposta(engine, resposta_id, request.form.get("texto", ""), wa.enviar_texto)
+                flash("Resposta enviada.")
+            except (respostas.RespostaErro, WhatsAppErro) as exc:
+                flash(str(exc))
+        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+
+    @app.post("/respostas/<int:resposta_id>/ignorar")
+    def respostas_ignorar(resposta_id: int):
+        respostas.ignorar(engine, resposta_id)
+        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+
+    @app.post("/respostas/analisar")
+    def respostas_analisar():
+        if classificador is None:
+            flash("ANTHROPIC_API_KEY não configurada no Railway.")
+        else:
+            n = respostas.processar_pendentes(engine, classificador, espera=timedelta(0))
+            flash(f"{n} resposta(s) analisada(s)." if n else "Nenhuma resposta aguardando análise.")
+        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")))
+
+    @app.get("/respostas/planilha.csv")
+    def respostas_csv():
+        dia = _dia_da_url()
+        corpo = respostas.planilha_csv(respostas.listar(engine, dia, dia))
+        return Response(corpo, mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename=pos-venda-{dia.isoformat()}.csv"})
+
     return app
 
 
@@ -188,8 +328,10 @@ textarea{min-height:92px;resize:vertical}
 .enviado{opacity:.6}.ok{color:var(--ac);font-weight:600}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--bd);font-size:14px}
 .linha{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.erro{color:var(--al)}.critico{border-left:5px solid var(--al)}.atencao{border-left:5px solid #d9a400}.positivo{border-left:5px solid var(--ac)}
+.fala{background:#f1efe9;border-radius:8px;padding:8px 10px;white-space:pre-wrap}
 </style></head><body>
-{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a></nav>
+{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
 <main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main></body></html>""",
 
@@ -209,13 +351,18 @@ Toque em "Abrir no WhatsApp", envie a mensagem e volte para o próximo.</p>
 {% else %}<p class="quieto">A lista deste dia ainda não foi buscada.</p>{% endif %}
 <div class="linha">{% if takeat_ok and dia < hoje %}<form method="post" action="{{ url_for('envio_buscar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input type="hidden" name="data" value="{{ dia.isoformat() }}"><button class="btn2">Buscar de novo no Takeat</button></form>{% endif %}
-{% if dados.envios %}<a class="btn btn2" href="{{ url_for('envio_csv', data=dia.isoformat()) }}">Baixar "Lista do envio" (CSV)</a>{% endif %}</div></div>
+{% if dados.envios %}<a class="btn btn2" href="{{ url_for('envio_csv', data=dia.isoformat()) }}">Baixar "Lista do envio" (CSV)</a>{% endif %}</div>
+{% if wa_ok and pendentes %}<form method="post" action="{{ url_for('envio_whatsapp') }}" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
+<input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<button onclick="return confirm('Mandar a pesquisa pelo WhatsApp para {{ pendentes }} cliente(s) agora?')">Enviar agora pelo WhatsApp ({{ pendentes }})</button></form>{% endif %}
+<p class="quieto">Envio automático: {{ ('ligado, às %dh' % cfg.hora) if cfg.envio_automatico else 'desligado' }}{% if rotina %} · último: {{ rotina.resultado or 'rodando' }}{% endif %}.</p></div>
 
 {% for e in dados.envios %}<div class="card cli{{ ' enviado' if e.enviado_em }}" id="e{{ e.id }}">
 <div class="topo"><strong>{{ e.nome_completo or e.nome or 'Sem nome' }}</strong><span class="tag">{{ e.origem }}</span>
 <span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ mascarar(e.telefone) }}</span></div>
 <textarea id="m{{ e.id }}" aria-label="Mensagem">{{ e.mensagem }}</textarea>
-<div class="linha">{% if e.enviado_em %}<span class="ok">✓ enviado</span>
+{% if e.erro %}<p class="erro">Erro no WhatsApp: {{ e.erro }}</p>{% endif %}
+<div class="linha">{% if e.enviado_em %}<span class="ok">✓ enviado{% if e.wa_status %} · {{ {'sent': 'saiu', 'delivered': 'entregue', 'read': 'lida', 'failed': 'falhou'}.get(e.wa_status, e.wa_status) }}{% endif %}</span>
 <form method="post" action="{{ url_for('envio_desfazer', envio_id=e.id) }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input type="hidden" name="data" value="{{ dia.isoformat() }}"><button class="btn2">Desfazer</button></form>
 {% else %}<button type="button" onclick="abrir({{ e.id }}, '{{ e.telefone }}')">Abrir no WhatsApp</button>{% endif %}</div></div>
@@ -236,6 +383,52 @@ function abrir(id, tel) {
   });
 }
 </script>{% endblock %}""",
+
+    "respostas.html": """{% extends 'base.html' %}{% block corpo %}
+<div class="card"><form method="get" class="linha"><label>Dia da visita/pedido</label>
+<input type="date" name="data" value="{{ dia.isoformat() }}" max="{{ (hoje - timedelta(days=1)).isoformat() }}" style="width:auto">
+<button class="btn2">Ver</button></form>
+<p class="resumo">{{ contagem }}</p>
+<div class="linha">{% if ia_ok %}<form method="post" action="{{ url_for('respostas_analisar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
+<input type="hidden" name="data" value="{{ dia.isoformat() }}"><button class="btn2">Analisar agora</button></form>{% else %}<span class="quieto">IA não configurada (ANTHROPIC_API_KEY).</span>{% endif %}
+{% if rows %}<a class="btn btn2" href="{{ url_for('respostas_csv', data=dia.isoformat()) }}">Baixar planilha (CSV)</a>{% endif %}</div>
+<p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
+{% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
+<div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}</span><span class="tag">Versão {{ r.versao }}</span>
+<span class="quieto">{{ r.prato or 'seu pedido' }} · {{ mascarar(r.telefone) }} · {{ r.historico or 'sem histórico' }}</span></div>
+<div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
+{% for t in r.textos %}<div class="fala">{{ t }}</div>{% endfor %}
+{% if r.resumo %}<p><b>Resumo:</b> {{ r.resumo }}</p>{% endif %}
+{% if r.motivo_revisao %}<p class="erro">Revisar: {{ r.motivo_revisao }}</p>{% endif %}
+{% if r.acao_sugerida %}<p><b>Ação sugerida:</b> {{ r.acao_sugerida }}</p>{% endif %}
+{% if r.status in (R.REVISAR, R.PODE_ENVIAR) %}<form method="post" action="{{ url_for('respostas_enviar', resposta_id=r.id) }}" class="cli">
+<input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<textarea name="texto" aria-label="Resposta">{{ r.resposta_sugerida }}</textarea>
+<div class="linha">{% if wa_ok %}<button>Enviar resposta</button>{% endif %}
+<button class="btn2" formaction="{{ url_for('respostas_ignorar', resposta_id=r.id) }}">Não responder</button></div></form>
+{% elif r.status == R.RESPONDIDO %}<p class="ok">✓ Respondido: {{ r.resposta_sugerida }}</p>{% endif %}
+</div>{% else %}<div class="card quieto">Nenhuma resposta para as visitas deste dia ainda.</div>{% endfor %}
+{% if fora %}<div class="card"><h3 style="margin-top:0">Fora da lista</h3><p class="quieto">Mensagens de números que não estão na lista. Não foram ligadas a ninguém.</p>
+<table><tr><th>Quando</th><th>Telefone</th><th>Mensagem</th></tr>{% for m in fora %}<tr><td>{{ m.quando }}</td>
+<td>{{ mascarar(m.telefone) }}</td><td>{{ m.texto }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}""",
+
+    "privacidade.html": """{% extends 'base.html' %}{% block corpo %}<div class="card">
+<h2 style="margin-top:0">Política de privacidade da pesquisa de satisfação</h2>
+<p>Bar São Paulo (CNPJ 54.615.219/0001-24).</p>
+<p><b>O que usamos.</b> Depois da sua visita ou do seu pedido no delivery, usamos o primeiro nome, o telefone e o prato
+registrados no nosso sistema de vendas para mandar uma pesquisa de satisfação pelo WhatsApp. Guardamos a sua resposta
+para melhorar o atendimento.</p>
+<p><b>Para quê.</b> Só para saber como foi a sua experiência e responder você. Não usamos esses dados para propaganda
+e não vendemos nem cedemos para ninguém.</p>
+<p><b>Quem mais vê.</b> A mensagem passa pelo WhatsApp (Meta). Para organizar as respostas, o texto que você escreve
+é lido por uma ferramenta de inteligência artificial (Claude, da Anthropic), e uma pessoa da nossa equipe revisa as
+respostas mais importantes.</p>
+<p><b>Por quanto tempo.</b> Mandamos no máximo uma pesquisa por semana. Os dados ficam guardados no servidor do nosso
+painel de pós-venda enquanto forem úteis para o atendimento.</p>
+<p><b>Não quer receber?</b> Responda PARAR na conversa e você não recebe mais. Para pedir que apaguemos seus dados ou
+tirar dúvidas, fale com a gente pelo mesmo WhatsApp.</p>
+</div>{% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
 <p class="quieto">Quem está aqui nunca entra na lista do envio.</p>
