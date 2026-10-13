@@ -3,6 +3,8 @@
 Referências (developers.facebook.com/docs/whatsapp/cloud-api):
 - POST /{phone-number-id}/register (messaging_product + pin de 6 dígitos): registra o número na Cloud API; sem isso
   o WhatsApp Manager mostra "Pendente". GET /{phone-number-id}?fields=...: situação do número.
+- POST/GET /{waba-id}/subscribed_apps: liga o app à conta do WhatsApp (WABA). Sem isso a Meta não manda as
+  mensagens recebidas para o webhook, mesmo com o webhook verificado.
 - POST /{phone-number-id}/messages, type=template (primeira mensagem, modelo aprovado) ou type=text
   (só dentro das 24 h depois da última mensagem do cliente).
 - Webhook: GET com hub.mode/hub.verify_token/hub.challenge para a verificação; POST com
@@ -36,20 +38,22 @@ class WhatsApp:
     def __init__(self, token: str, phone_number_id: str, versao: str = "v23.0",
                  session: requests.Session | None = None):
         self._token = token
-        self._base = f"https://graph.facebook.com/{versao}/{phone_number_id}"
+        self._raiz = f"https://graph.facebook.com/{versao}"
+        self._base = f"{self._raiz}/{phone_number_id}"
         self._http = session or requests.Session()
 
     def __repr__(self) -> str:  # nunca expor o token
         return "WhatsApp(...)"
 
     def _pedir(self, metodo: str, caminho: str, payload: dict[str, Any] | None = None,
-               params: dict[str, str] | None = None) -> dict[str, Any]:
+               params: dict[str, str] | None = None, url: str | None = None) -> dict[str, Any]:
         cabecalho = {"Authorization": f"Bearer {self._token}"}
+        url = url or self._base + caminho
         try:
             if metodo == "GET":
-                resp = self._http.get(self._base + caminho, params=params, timeout=TIMEOUT, headers=cabecalho)
+                resp = self._http.get(url, params=params, timeout=TIMEOUT, headers=cabecalho)
             else:
-                resp = self._http.post(self._base + caminho, json=payload, timeout=TIMEOUT, headers=cabecalho)
+                resp = self._http.post(url, json=payload, timeout=TIMEOUT, headers=cabecalho)
         except requests.RequestException as exc:
             raise WhatsAppErro(f"Falha de rede ao falar com o WhatsApp: {type(exc).__name__}") from exc
         if resp.status_code >= 400:
@@ -82,6 +86,21 @@ class WhatsApp:
         if not (len(pin) == 6 and pin.isdigit()):
             raise WhatsAppErro("O PIN precisa ter exatamente 6 números.")
         self._pedir("POST", "/register", {"messaging_product": "whatsapp", "pin": pin})
+
+    def _url_da_conta(self, waba_id: str) -> str:
+        if not waba_id.isdigit():
+            raise WhatsAppErro("A identificação da conta do WhatsApp precisa ter só números.")
+        return f"{self._raiz}/{waba_id}/subscribed_apps"
+
+    def apps_ligados(self, waba_id: str) -> list[str]:
+        """Nomes dos apps que recebem as mensagens desta conta do WhatsApp."""
+        dados = self._pedir("GET", "", url=self._url_da_conta(waba_id)).get("data") or []
+        return [str((d.get("whatsapp_business_api_data") or {}).get("name") or d.get("name") or "app sem nome")
+                for d in dados if isinstance(d, dict)]
+
+    def ligar_app(self, waba_id: str) -> None:
+        """Liga este app à conta do WhatsApp, para a Meta mandar as mensagens recebidas ao webhook."""
+        self._pedir("POST", "", url=self._url_da_conta(waba_id))
 
     def enviar_modelo(self, telefone: str, modelo: str, parametros: list[str], idioma: str = "pt_BR") -> str:
         return self._post({
