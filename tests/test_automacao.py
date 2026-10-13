@@ -40,6 +40,12 @@ class WhatsAppFalso:
         return {"display_phone_number": "+55 11 90000-0000", "verified_name": "Bar Fictício", "status": "PENDING",
                 "name_status": "APPROVED", "quality_rating": "UNKNOWN"}
 
+    def ligar_app(self, waba):
+        self.ligados = getattr(self, "ligados", []) + [waba]
+
+    def apps_ligados(self, waba):
+        return ["Pos-venda Ficticio"] if waba in getattr(self, "ligados", []) else []
+
     def registrar_numero(self, pin):
         self.registros = getattr(self, "registros", []) + [pin]
 
@@ -152,6 +158,34 @@ def test_registrar_numero_manda_pin_para_a_meta():
     for ruim in ("12345", "abcdef", "1234567"):
         with pytest.raises(WhatsAppErro):
             wa.registrar_numero(ruim)
+
+
+def test_ligar_app_na_conta_do_whatsapp():
+    class Resp:
+        status_code = 200
+
+        def __init__(self, dados):
+            self.dados = dados
+
+        def json(self):
+            return self.dados
+
+    class Sessao:
+        def post(self, url, json, timeout, headers):
+            self.post_url = url
+            return Resp({"success": True})
+
+        def get(self, url, params, timeout, headers):
+            self.get_url = url
+            return Resp({"data": [{"whatsapp_business_api_data": {"name": "Pos-venda Ficticio", "id": "9"}}]})
+
+    s = Sessao()
+    wa = WhatsApp("token-ficticio", "123", versao="v23.0", session=s)
+    wa.ligar_app("777")
+    assert s.post_url == "https://graph.facebook.com/v23.0/777/subscribed_apps"
+    assert wa.apps_ligados("777") == ["Pos-venda Ficticio"]
+    with pytest.raises(WhatsAppErro):
+        wa.ligar_app("777/../x")
 
 
 def test_ia_le_json_e_limita_nota():
@@ -402,3 +436,12 @@ def test_pagina_do_numero_mostra_situacao_e_registra(app_wa):
     texto = r.get_data(as_text=True)
     assert "Número registrado" in texto and "246813" not in texto
     assert c.post("/whatsapp", data={"pin": "246813"}).status_code == 400  # sem CSRF
+
+
+def test_pagina_do_numero_liga_o_recebimento(app_wa):
+    app, wa = app_wa
+    c, csrf = _logado(app)
+    r = c.post("/whatsapp", data={"csrf": csrf, "acao": "ligar", "waba": "777"}, follow_redirects=True)
+    texto = r.get_data(as_text=True)
+    assert wa.ligados == ["777"] and "Recebimento ligado" in texto and "Pos-venda Ficticio" in texto
+    assert not getattr(wa, "registros", [])  # ligar não registra o número

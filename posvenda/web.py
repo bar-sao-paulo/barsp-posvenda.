@@ -3,7 +3,7 @@
 Rodar no Railway: gunicorn "posvenda.web:criar_app()" --bind 0.0.0.0:$PORT
 Variáveis: DATABASE_URL, TAKEAT_API_KEY, TAKEAT_BASE_URL (opcional), SECRET_KEY, LOGIN_USUARIO, LOGIN_SENHA.
 Etapa 2 (opcionais): WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN,
-WHATSAPP_API_VERSION, WHATSAPP_MODELO_A/B/C, ANTHROPIC_API_KEY, ENVIO_AUTOMATICO, ENVIO_HORA, RESPOSTA_AUTOMATICA,
+WHATSAPP_API_VERSION, WHATSAPP_WABA_ID, WHATSAPP_MODELO_A/B/C, ANTHROPIC_API_KEY, ENVIO_AUTOMATICO, ENVIO_HORA, RESPOSTA_AUTOMATICA,
 ALERTA_EMAIL, RESEND_API_KEY, EMAIL_FROM, PAINEL_URL.
 """
 from __future__ import annotations
@@ -307,8 +307,18 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     # ----------------------------------------------------------------------- número do WhatsApp (registro)
     @app.route("/whatsapp", methods=["GET", "POST"])
     def whatsapp_numero():
-        situacao, erro = None, None
+        situacao, erro, ligados, erro_ligados = None, None, None, None
         if wa is not None and request.method == "POST":
+            if request.form.get("acao") == "ligar":
+                conta = request.form.get("waba", "").strip()
+                try:
+                    wa.ligar_app(conta)
+                    nomes = wa.apps_ligados(conta)
+                    flash("Recebimento ligado. Apps que recebem as mensagens desta conta: "
+                          + (", ".join(nomes) or "nenhum") + ".")
+                except WhatsAppErro as exc:
+                    flash(f"Não consegui ligar o recebimento: {exc}")
+                return redirect(url_for("whatsapp_numero", waba=conta))
             # O PIN vai direto para a Meta: não é gravado, nem mostrado, nem vai para o log.
             try:
                 wa.registrar_numero(request.form.get("pin", "").strip())
@@ -316,13 +326,19 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             except WhatsAppErro as exc:
                 flash(f"Não consegui registrar o número: {exc}")
             return redirect(url_for("whatsapp_numero"))
+        conta = request.args.get("waba") or os.environ.get("WHATSAPP_WABA_ID", "")
         if wa is not None:
             try:
                 situacao = wa.situacao_do_numero()
             except WhatsAppErro as exc:
                 erro = str(exc)
+            if conta:
+                try:
+                    ligados = wa.apps_ligados(conta)
+                except WhatsAppErro as exc:
+                    erro_ligados = str(exc)
         return render_template("whatsapp.html", wa_ok=wa is not None, situacao=situacao, erro=erro,
-                               STATUS=_STATUS_NUMERO)
+                               STATUS=_STATUS_NUMERO, conta=conta, ligados=ligados, erro_ligados=erro_ligados)
 
     return app
 
@@ -477,7 +493,15 @@ O PIN vai direto para a Meta e não fica gravado no painel.</p>
 <form method="post" class="cli" autocomplete="off"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="PIN de 6 números"
  autocomplete="new-password" required style="max-width:220px">
-<div><button onclick="return confirm('Registrar o número do WhatsApp na Meta com este PIN?')">Registrar número</button></div></form></div>{% endif %}
+<div><button onclick="return confirm('Registrar o número do WhatsApp na Meta com este PIN?')">Registrar número</button></div></form></div>
+<div class="card"><h3 style="margin-top:0">Receber as respostas</h3>
+<p class="quieto">Liga este app à conta do WhatsApp onde está o número, para a Meta mandar ao painel as mensagens que os
+clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no quadro do canto de cima (só números).</p>
+{% if ligados is not none %}<p>Apps que recebem as mensagens desta conta: <strong>{{ ligados|join(', ') or 'nenhum' }}</strong></p>{% endif %}
+{% if erro_ligados %}<p class="erro">Não consegui ver os apps ligados: {{ erro_ligados }}</p>{% endif %}
+<form method="post" class="cli"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="acao" value="ligar">
+<input name="waba" value="{{ conta }}" inputmode="numeric" pattern="[0-9]+" placeholder="Identificação da conta do WhatsApp" required style="max-width:320px">
+<div><button>Ligar o recebimento</button></div></form></div>{% endif %}
 {% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
