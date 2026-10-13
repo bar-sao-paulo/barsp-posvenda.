@@ -36,6 +36,13 @@ class WhatsAppFalso:
         self.textos.append((telefone, texto))
         return f"wamid.t{len(self.textos)}"
 
+    def situacao_do_numero(self):
+        return {"display_phone_number": "+55 11 90000-0000", "verified_name": "Bar Fictício", "status": "PENDING",
+                "name_status": "APPROVED", "quality_rating": "UNKNOWN"}
+
+    def registrar_numero(self, pin):
+        self.registros = getattr(self, "registros", []) + [pin]
+
 
 def analise(nota=10, estimada=False, resposta="Oi, João! Ficamos felizes que tenha gostado. Volte sempre!",
             ressalva="", compensacao=False, resumo="Gostou da picanha"):
@@ -123,6 +130,28 @@ def test_whatsapp_erro_nao_expoe_token():
         wa.enviar_texto(JOAO, "oi")
     assert "token-ficticio" not in str(exc.value) and "token-ficticio" not in repr(wa)
     assert exc.value.codigo == 190
+
+
+def test_registrar_numero_manda_pin_para_a_meta():
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"success": True}
+
+    class Sessao:
+        def post(self, url, json, timeout, headers):
+            self.url, self.json = url, json
+            return Resp()
+
+    s = Sessao()
+    wa = WhatsApp("token-ficticio", "123", versao="v23.0", session=s)
+    wa.registrar_numero("246813")
+    assert s.url == "https://graph.facebook.com/v23.0/123/register"
+    assert s.json == {"messaging_product": "whatsapp", "pin": "246813"}
+    for ruim in ("12345", "abcdef", "1234567"):
+        with pytest.raises(WhatsAppErro):
+            wa.registrar_numero(ruim)
 
 
 def test_ia_le_json_e_limita_nota():
@@ -361,3 +390,15 @@ def test_privacidade_e_publica(app_wa):
     app, _ = app_wa
     r = app.test_client().get("/privacidade")
     assert r.status_code == 200 and "PARAR" in r.get_data(as_text=True)
+
+
+def test_pagina_do_numero_mostra_situacao_e_registra(app_wa):
+    app, wa = app_wa
+    c, csrf = _logado(app)
+    pagina = c.get("/whatsapp").get_data(as_text=True)
+    assert "Pendente (falta registrar)" in pagina and "Registrar número" in pagina
+    r = c.post("/whatsapp", data={"csrf": csrf, "pin": "246813"}, follow_redirects=True)
+    assert wa.registros == ["246813"]
+    texto = r.get_data(as_text=True)
+    assert "Número registrado" in texto and "246813" not in texto
+    assert c.post("/whatsapp", data={"pin": "246813"}).status_code == 400  # sem CSRF

@@ -304,7 +304,37 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         return Response(corpo, mimetype="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename=pos-venda-{dia.isoformat()}.csv"})
 
+    # ----------------------------------------------------------------------- número do WhatsApp (registro)
+    @app.route("/whatsapp", methods=["GET", "POST"])
+    def whatsapp_numero():
+        situacao, erro = None, None
+        if wa is not None and request.method == "POST":
+            # O PIN vai direto para a Meta: não é gravado, nem mostrado, nem vai para o log.
+            try:
+                wa.registrar_numero(request.form.get("pin", "").strip())
+                flash("Número registrado na Meta. Em alguns minutos o WhatsApp Manager deve mostrar \"Conectado\".")
+            except WhatsAppErro as exc:
+                flash(f"Não consegui registrar o número: {exc}")
+            return redirect(url_for("whatsapp_numero"))
+        if wa is not None:
+            try:
+                situacao = wa.situacao_do_numero()
+            except WhatsAppErro as exc:
+                erro = str(exc)
+        return render_template("whatsapp.html", wa_ok=wa is not None, situacao=situacao, erro=erro,
+                               STATUS=_STATUS_NUMERO)
+
     return app
+
+
+_STATUS_NUMERO = {
+    "CONNECTED": "Conectado", "PENDING": "Pendente (falta registrar)", "DISCONNECTED": "Desconectado",
+    "FLAGGED": "Sinalizado pela Meta", "RESTRICTED": "Restrito", "BANNED": "Bloqueado pela Meta",
+    "MIGRATED": "Migrado", "UNVERIFIED": "Não verificado", "DELETED": "Apagado",
+    "APPROVED": "Aprovado", "PENDING_REVIEW": "Em análise", "DECLINED": "Recusado", "EXPIRED": "Expirado",
+    "AVAILABLE_WITHOUT_REVIEW": "Liberado sem análise", "NONE": "Sem análise", "VERIFIED": "Verificado",
+    "NOT_VERIFIED": "Não verificado", "GREEN": "Alta", "YELLOW": "Média", "RED": "Baixa", "UNKNOWN": "Ainda sem avaliação",
+}
 
 
 TEMPLATES = {
@@ -331,7 +361,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 .erro{color:var(--al)}.critico{border-left:5px solid var(--al)}.atencao{border-left:5px solid #d9a400}.positivo{border-left:5px solid var(--ac)}
 .fala{background:#f1efe9;border-radius:8px;padding:8px 10px;white-space:pre-wrap}
 </style></head><body>
-{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a></nav>
+{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
 <main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main></body></html>""",
 
@@ -429,6 +459,26 @@ painel de pós-venda enquanto forem úteis para o atendimento.</p>
 <p><b>Não quer receber?</b> Responda PARAR na conversa e você não recebe mais. Para pedir que apaguemos seus dados ou
 tirar dúvidas, fale com a gente pelo mesmo WhatsApp.</p>
 </div>{% endblock %}""",
+
+    "whatsapp.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Número do WhatsApp</h3>
+{% if not wa_ok %}<p class="erro">WhatsApp não configurado no Railway (WHATSAPP_TOKEN e WHATSAPP_PHONE_NUMBER_ID).</p>
+{% elif erro %}<p class="erro">Não consegui ler a situação do número: {{ erro }}</p>
+{% elif situacao %}<table>
+<tr><th>Número</th><td>{{ situacao.display_phone_number or '—' }}</td></tr>
+<tr><th>Nome</th><td>{{ situacao.verified_name or '—' }}</td></tr>
+<tr><th>Situação</th><td><strong>{{ STATUS.get(situacao.status, situacao.status or '—') }}</strong></td></tr>
+<tr><th>Nome de exibição</th><td>{{ STATUS.get(situacao.name_status, situacao.name_status or '—') }}</td></tr>
+<tr><th>Verificação por código</th><td>{{ STATUS.get(situacao.code_verification_status, situacao.code_verification_status or '—') }}</td></tr>
+<tr><th>Qualidade</th><td>{{ STATUS.get(situacao.quality_rating, situacao.quality_rating or '—') }}</td></tr></table>{% endif %}</div>
+{% if wa_ok %}<div class="card"><h3 style="margin-top:0">Registrar o número</h3>
+<p class="quieto">Use quando o WhatsApp Manager mostrar o número como "Pendente". Invente um PIN de 6 números e guarde num
+lugar seguro: ele vira a senha do número (verificação em duas etapas) e a Meta pode pedir de novo no futuro.
+O PIN vai direto para a Meta e não fica gravado no painel.</p>
+<form method="post" class="cli" autocomplete="off"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
+<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="PIN de 6 números"
+ autocomplete="new-password" required style="max-width:220px">
+<div><button onclick="return confirm('Registrar o número do WhatsApp na Meta com este PIN?')">Registrar número</button></div></form></div>{% endif %}
+{% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
 <p class="quieto">Quem está aqui nunca entra na lista do envio.</p>
