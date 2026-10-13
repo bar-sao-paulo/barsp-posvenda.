@@ -30,11 +30,11 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `servico.py` | Lista do dia no banco (gerar, obter, marcar enviado, não enviar, CSV) |
 | `db.py` | Tabelas SQLAlchemy (`envios`, `nao_enviados`, `bloqueios`, `buscas`, `mensagens`, `respostas`, `rotinas`); colunas novas em `_COLUNAS_NOVAS` |
 | `takeat.py` | Cliente da Takeat (API key → token com escopo `table-sessions:read`) |
-| `whatsapp.py` | WhatsApp Cloud API (modelo, texto) e leitura/assinatura do webhook |
+| `whatsapp.py` | WhatsApp Cloud API (modelo, texto, situação e registro do número) e leitura/assinatura do webhook |
 | `ia.py` | Análise da resposta com o Claude (`claude-opus-5-5`, saída em JSON) |
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, agendador (thread) |
-| `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, CSV, webhook `/webhook/whatsapp`, `/saude` |
+| `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
 
 ## Convenções
 - Datas/horas: fuso `America/Sao_Paulo` (`lista.TZ`); no banco em UTC.

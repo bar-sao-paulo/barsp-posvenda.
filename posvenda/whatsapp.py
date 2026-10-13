@@ -1,6 +1,8 @@
 """WhatsApp Cloud API (Meta): envio de modelos e textos, e leitura do webhook.
 
 Referências (developers.facebook.com/docs/whatsapp/cloud-api):
+- POST /{phone-number-id}/register (messaging_product + pin de 6 dígitos): registra o número na Cloud API; sem isso
+  o WhatsApp Manager mostra "Pendente". GET /{phone-number-id}?fields=...: situação do número.
 - POST /{phone-number-id}/messages, type=template (primeira mensagem, modelo aprovado) ou type=text
   (só dentro das 24 h depois da última mensagem do cliente).
 - Webhook: GET com hub.mode/hub.verify_token/hub.challenge para a verificação; POST com
@@ -34,16 +36,20 @@ class WhatsApp:
     def __init__(self, token: str, phone_number_id: str, versao: str = "v23.0",
                  session: requests.Session | None = None):
         self._token = token
-        self._url = f"https://graph.facebook.com/{versao}/{phone_number_id}/messages"
+        self._base = f"https://graph.facebook.com/{versao}/{phone_number_id}"
         self._http = session or requests.Session()
 
     def __repr__(self) -> str:  # nunca expor o token
         return "WhatsApp(...)"
 
-    def _post(self, payload: dict[str, Any]) -> str:
+    def _pedir(self, metodo: str, caminho: str, payload: dict[str, Any] | None = None,
+               params: dict[str, str] | None = None) -> dict[str, Any]:
+        cabecalho = {"Authorization": f"Bearer {self._token}"}
         try:
-            resp = self._http.post(self._url, json=payload, timeout=TIMEOUT,
-                                   headers={"Authorization": f"Bearer {self._token}"})
+            if metodo == "GET":
+                resp = self._http.get(self._base + caminho, params=params, timeout=TIMEOUT, headers=cabecalho)
+            else:
+                resp = self._http.post(self._base + caminho, json=payload, timeout=TIMEOUT, headers=cabecalho)
         except requests.RequestException as exc:
             raise WhatsAppErro(f"Falha de rede ao falar com o WhatsApp: {type(exc).__name__}") from exc
         if resp.status_code >= 400:
@@ -55,9 +61,27 @@ class WhatsApp:
             detalhe = (erro.get("error_data") or {}).get("details") or erro.get("message") or ""
             raise WhatsAppErro(f"WhatsApp recusou (HTTP {resp.status_code}, código {codigo}): {detalhe[:200]}", codigo)
         try:
-            return str(resp.json()["messages"][0]["id"])
-        except (ValueError, KeyError, IndexError):
+            dados = resp.json()
+        except ValueError:
+            return {}
+        return dados if isinstance(dados, dict) else {}
+
+    def _post(self, payload: dict[str, Any]) -> str:
+        try:
+            return str(self._pedir("POST", "/messages", payload)["messages"][0]["id"])
+        except (KeyError, IndexError, TypeError):
             return ""
+
+    def situacao_do_numero(self) -> dict[str, Any]:
+        """Nome, número, status e avaliação do nome de exibição, como a Meta devolve."""
+        return self._pedir("GET", "", params={"fields": "display_phone_number,verified_name,name_status,status,"
+                                                        "code_verification_status,quality_rating"})
+
+    def registrar_numero(self, pin: str) -> None:
+        """Registra o número na Cloud API com o PIN de 6 dígitos (verificação em duas etapas). O PIN não é guardado."""
+        if not (len(pin) == 6 and pin.isdigit()):
+            raise WhatsAppErro("O PIN precisa ter exatamente 6 números.")
+        self._pedir("POST", "/register", {"messaging_product": "whatsapp", "pin": pin})
 
     def enviar_modelo(self, telefone: str, modelo: str, parametros: list[str], idioma: str = "pt_BR") -> str:
         return self._post({

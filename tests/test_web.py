@@ -71,7 +71,7 @@ def test_lista_de_ontem_busca_sozinha_no_takeat(ambiente):
     inicio, fim = takeat.chamadas[0]
     assert (fim - inicio).days <= 3
     assert "5 mensagens prontas" in html and "| 3 não enviados" in html
-    assert "Oi, João! Aqui é a Thais" in html and "a picanha cheff ontem?" in html
+    assert "Oi, João! Aqui é a Thais" in html and "a picanha cheff ontem" in html  # a versão C não tem "?" depois
     assert "Pedido do iFood" in html
     assert "90000-0023" not in html.replace("5511900000023", "")  # telefone só no link, não à mostra
     # segunda visita não busca de novo
