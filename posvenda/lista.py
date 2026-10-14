@@ -67,6 +67,14 @@ def normalizar_telefone(bruto: str | None) -> str | None:
     return "55" + digitos
 
 
+def chave_telefone(telefone: str) -> str:
+    """DDD + 8 últimos dígitos. O WhatsApp às vezes manda celular brasileiro sem o 9 (55 11 8765-4321)."""
+    d = re.sub(r"\D", "", telefone or "")
+    if d.startswith("55") and len(d) in (12, 13):
+        d = d[2:]
+    return d[:2] + d[-8:] if len(d) in (10, 11) else d
+
+
 def mascarar(telefone: str) -> str:
     """Telefone para a tela: só os 4 últimos dígitos (o completo fica na planilha interna)."""
     t = telefone[2:] if telefone.startswith("55") else telefone
@@ -206,6 +214,23 @@ def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candid
                 prato=prato_principal(bill),
                 ifood=ifood,
             ))
+    return saida
+
+
+def visitas_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> set[tuple[str, date]]:
+    """(chave do telefone, dia) de cada conta com celular nas comandas abertas entre `de` e `ate`
+    (horário de São Paulo). Comanda cancelada fica de fora; várias contas no mesmo dia contam uma vez."""
+    saida: set[tuple[str, date]] = set()
+    for s in sessoes:
+        if (s.get("status") or "").lower() == "canceled" or s.get("delivery_canceled_at"):
+            continue
+        dia = _data_local(s.get("start_time"))
+        if dia is None or not (de <= dia <= ate):
+            continue
+        for bill in s.get("bills") or []:
+            tel = normalizar_telefone((bill.get("buyer") or {}).get("phone"))
+            if tel:
+                saida.add((chave_telefone(tel), dia))
     return saida
 
 

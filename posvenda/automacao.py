@@ -5,6 +5,7 @@ A cada minuto:
   WhatsApp com os modelos aprovados na Meta (só com ENVIO_AUTOMATICO=1). Uma vez por dia (trava em `rotinas`).
 - Analisa as respostas que chegaram (Claude), avisa as críticas 🔴 por e-mail e, com RESPOSTA_AUTOMATICA=1,
   responde sozinho só as que não precisam de revisão.
+- Lê aos poucos o histórico de comandas dos últimos 12 meses (número de compras de cada cliente).
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from . import lista, respostas, servico
+from . import historico, lista, respostas, servico
 from .db import envios, rotinas
 from .whatsapp import WhatsAppErro
 
@@ -183,6 +184,11 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     respostas.processar_pendentes(engine, classificar, agora=agora,
                                   enviar_texto=whatsapp.enviar_texto if whatsapp else None,
                                   resposta_automatica=cfg.resposta_automatica, alertar=alertar)
+    if buscar is not None:  # histórico de compras: poucos blocos de 3 dias por minuto até fechar 12 meses
+        try:
+            historico.carregar(engine, buscar, agora.astimezone(lista.TZ).date(), agora=agora)
+        except Exception as exc:
+            log.warning("Histórico de compras: falha ao ler o Takeat (%s); tento de novo no próximo minuto.", exc)
 
 
 def iniciar_agendador(engine: Engine, cfg: Config, **deps) -> threading.Thread:

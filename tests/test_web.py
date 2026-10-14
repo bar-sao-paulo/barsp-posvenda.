@@ -73,6 +73,7 @@ def test_lista_de_ontem_busca_sozinha_no_takeat(ambiente):
     assert "5 mensagens prontas" in html and "| 3 não enviados" in html
     assert "Oi, João! Aqui é a Thais" in html and "a picanha cheff ontem" in html  # a versão C não tem "?" depois
     assert "Pedido do iFood" in html
+    assert "🛒 1ª compra em 12 meses" in html  # histórico de compras (ainda carregando os 12 meses)
     assert "90000-0023" not in html.replace("5511900000023", "")  # telefone só no link, não à mostra
     # segunda visita não busca de novo
     c.get("/envio")

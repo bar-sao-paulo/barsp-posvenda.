@@ -18,7 +18,7 @@ from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_te
 from jinja2 import DictLoader
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import automacao, lista, respostas, servico
+from . import automacao, historico, lista, respostas, servico
 from .db import criar_engine
 from .takeat import TakeatClient, TakeatError
 from .whatsapp import WhatsApp, WhatsAppErro, assinatura_valida, ler_webhook
@@ -167,6 +167,9 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         for n in dados.nao_enviados:
             motivos[n["motivo"]] = motivos.get(n["motivo"], 0) + 1
         pendentes = sum(1 for e in dados.envios if e["enviado_em"] is None)
+        for e, (txt, _) in zip(dados.envios, historico.compras(
+                engine, [(e["telefone"], e["data_visita"]) for e in dados.envios], hoje())):
+            e["compras"] = txt
         return render_template("envio.html", dados=dados, dia=dia, hoje=hoje(), motivos=motivos,
                                mascarar=lista.mascarar, takeat_ok=buscar is not None, timedelta=timedelta,
                                tz=lista.TZ, wa_ok=wa is not None, pendentes=pendentes, cfg=cfg,
@@ -261,7 +264,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     @app.get("/respostas")
     def respostas_pagina():
         dia = _dia_da_url()
-        rows = respostas.listar(engine, dia, dia)
+        rows = respostas.listar(engine, dia, dia, hoje())
         inicio = datetime.combine(dia + timedelta(days=1), time(), lista.TZ)
         fora = respostas.fora_da_lista(engine, inicio, inicio + timedelta(days=2))
         for m in fora:
@@ -418,7 +421,7 @@ Toque em "Abrir no WhatsApp", envie a mensagem e volte para o próximo.</p>
 
 {% for e in dados.envios %}<div class="card cli{{ ' enviado' if e.enviado_em }}" id="e{{ e.id }}">
 <div class="topo"><strong>{{ e.nome_completo or e.nome or 'Sem nome' }}</strong><span class="tag">{{ e.origem }}</span>
-<span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ mascarar(e.telefone) }}</span></div>
+<span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ mascarar(e.telefone) }} · 🛒 {{ e.compras }}</span></div>
 <textarea id="m{{ e.id }}" aria-label="Mensagem">{{ e.mensagem }}</textarea>
 {% if e.erro %}<p class="erro">Erro no WhatsApp: {{ e.erro }}</p>{% endif %}
 <div class="linha">{% if e.enviado_em %}<span class="ok">✓ enviado{% if e.wa_status %} · {{ {'sent': 'saiu', 'delivered': 'entregue', 'read': 'lida', 'failed': 'falhou'}.get(e.wa_status, e.wa_status) }}{% endif %}</span>
@@ -457,7 +460,7 @@ function abrir(id, tel) {
 <p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
 {% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
 <div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}</span><span class="tag">Versão {{ r.versao }}</span>
-<span class="quieto">{{ r.prato or 'seu pedido' }} · {{ mascarar(r.telefone) }} · {{ r.historico or 'sem histórico' }}</span></div>
+<span class="quieto">{{ r.prato or 'seu pedido' }} · {{ mascarar(r.telefone) }} · 🛒 {{ r.historico }}</span></div>
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
 {% for t in r.textos %}<div class="fala">{{ t }}</div>{% endfor %}
 {% if r.resumo %}<p><b>Resumo:</b> {{ r.resumo }}</p>{% endif %}

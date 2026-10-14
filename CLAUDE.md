@@ -33,7 +33,8 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `whatsapp.py` | WhatsApp Cloud API (modelo, texto, situação e registro do número) e leitura/assinatura do webhook |
 | `ia.py` | Análise da resposta com o Claude (`claude-opus-5-5`, saída em JSON) |
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
-| `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, agendador (thread) |
+| `historico.py` | Compras do cliente nos últimos 12 meses (dias com comanda, tabela `visitas`), lidas do Takeat em blocos de 3 dias (`historico_blocos`) pelo agendador |
+| `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
 | `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
 
 ## Convenções
