@@ -268,7 +268,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             q = m["criado_em"]
             m["quando"] = (q if q.tzinfo else q.replace(tzinfo=timezone.utc)).astimezone(lista.TZ).strftime("%d/%m %H:%M")
         return render_template("respostas.html", rows=rows, dia=dia, hoje=hoje(), timedelta=timedelta,
-                               contagem=respostas.contagem(rows), fora=fora, mascarar=lista.mascarar,
+                               contagem=respostas.contagem(rows), fora=fora,
+                               positivas=len(respostas.positivas_para_enviar(rows)), mascarar=lista.mascarar,
                                wa_ok=wa is not None, ia_ok=classificador is not None, R=respostas, tz=lista.TZ)
 
     @app.post("/respostas/<int:resposta_id>/enviar")
@@ -287,6 +288,18 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     def respostas_ignorar(resposta_id: int):
         respostas.ignorar(engine, resposta_id)
         return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+
+    @app.post("/respostas/enviar-positivas")
+    def respostas_enviar_positivas():
+        dia = _dia_da_url()
+        if wa is None:
+            flash("WhatsApp não configurado no Railway.")
+        else:
+            res = respostas.enviar_positivas(engine, dia, wa.enviar_texto)
+            flash(f"{res.enviadas} resposta(s) 🟢 enviada(s)."
+                  + (f" {len(res.erros)} não saíram e voltaram para revisão. Primeiro erro: {res.erros[0]}"
+                     if res.erros else ""))
+        return redirect(url_for("respostas_pagina", data=dia.isoformat()))
 
     @app.post("/respostas/analisar")
     def respostas_analisar():
@@ -437,7 +450,10 @@ function abrir(id, tel) {
 <p class="resumo">{{ contagem }}</p>
 <div class="linha">{% if ia_ok %}<form method="post" action="{{ url_for('respostas_analisar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input type="hidden" name="data" value="{{ dia.isoformat() }}"><button class="btn2">Analisar agora</button></form>{% else %}<span class="quieto">IA não configurada (ANTHROPIC_API_KEY).</span>{% endif %}
-{% if rows %}<a class="btn btn2" href="{{ url_for('respostas_csv', data=dia.isoformat()) }}">Baixar planilha (CSV)</a>{% endif %}</div>
+{% if rows %}<a class="btn btn2" href="{{ url_for('respostas_csv', data=dia.isoformat()) }}">Baixar planilha (CSV)</a>{% endif %}
+{% if wa_ok and positivas %}<form method="post" action="{{ url_for('respostas_enviar_positivas') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
+<input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<button onclick="if(!confirm('Mandar a resposta sugerida para as {{ positivas }} avaliação(ões) 🟢 de uma vez?'))return false;this.disabled=true;this.form.submit();return false">Enviar todas as 🟢 ({{ positivas }})</button></form>{% endif %}</div>
 <p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
 {% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
 <div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}</span><span class="tag">Versão {{ r.versao }}</span>
