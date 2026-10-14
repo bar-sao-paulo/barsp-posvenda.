@@ -278,6 +278,44 @@ def enviar_resposta(engine: Engine, resposta_id: int, texto: str, enviar_texto: 
             status=RESPONDIDO, respondida_em=agora, resposta_sugerida=texto))
 
 
+ENVIANDO = "Enviando"
+
+
+@dataclass
+class ResultadoLote:
+    enviadas: int = 0
+    erros: list[str] | None = None
+
+
+def positivas_para_enviar(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """🟢 já analisadas, sem motivo de revisão e ainda não respondidas."""
+    return [r for r in rows if r["gravidade"] == POSITIVO and r["status"] == PODE_ENVIAR]
+
+
+def enviar_positivas(engine: Engine, dia: date, enviar_texto: Callable[[str, str], str],
+                     agora: datetime | None = None) -> ResultadoLote:
+    """Manda de uma vez a resposta sugerida para todas as 🟢 do dia que podem sair (botão "Enviar todas as 🟢").
+    Cada resposta é "reservada" antes do envio, para um segundo clique não mandar a mesma mensagem duas vezes."""
+    agora = agora or agora_utc()
+    res = ResultadoLote(erros=[])
+    for r in positivas_para_enviar(listar(engine, dia, dia)):
+        with engine.begin() as con:
+            reservou = con.execute(update(respostas).where(and_(
+                respostas.c.id == r["id"], respostas.c.status == PODE_ENVIAR)).values(status=ENVIANDO)).rowcount
+        if not reservou:
+            continue
+        try:
+            enviar_resposta(engine, r["id"], r["resposta_sugerida"] or "", enviar_texto, agora)
+            res.enviadas += 1
+        except Exception as exc:  # 24 h vencidas, WhatsApp recusou etc.: volta para revisão
+            nome = r.get("nome") or r.get("nome_completo") or "cliente"
+            res.erros.append(f"{nome}: {exc}")
+            with engine.begin() as con:
+                con.execute(update(respostas).where(respostas.c.id == r["id"]).values(
+                    status=REVISAR, motivo_revisao=f"envio em lote falhou: {exc}"[:300]))
+    return res
+
+
 def ignorar(engine: Engine, resposta_id: int) -> None:
     with engine.begin() as con:
         con.execute(update(respostas).where(respostas.c.id == resposta_id).values(status=IGNORADO))

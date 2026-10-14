@@ -445,3 +445,40 @@ def test_pagina_do_numero_liga_o_recebimento(app_wa):
     texto = r.get_data(as_text=True)
     assert wa.ligados == ["777"] and "Recebimento ligado" in texto and "Pos-venda Ficticio" in texto
     assert not getattr(wa, "registros", [])  # ligar não registra o número
+
+
+def test_enviar_todas_as_positivas(app_wa, engine):
+    app, wa = app_wa
+    _enviar_tudo(engine)
+    _receber(engine, "Nota 10, tudo ótimo", quando=datetime.now(timezone.utc) - timedelta(minutes=30))
+    _receber(engine, "Nota 3", telefone="5511900000025", wa_id="wamid.in2",
+             quando=datetime.now(timezone.utc) - timedelta(minutes=30))
+    respostas.processar_pendentes(engine, ClaudeFalso(), espera=timedelta(0))  # as duas saem com nota 10 da IA falsa...
+    with engine.begin() as con:  # ...e a segunda vira 🔴, que nunca entra no lote
+        rid = con.execute(select(t_respostas.c.id).order_by(t_respostas.c.id.desc())).scalar()
+        con.execute(t_respostas.update().where(t_respostas.c.id == rid).values(
+            nota=3, gravidade=respostas.CRITICO, status=respostas.REVISAR))
+    c, csrf = _logado(app)
+    pagina = c.get("/respostas?data=2026-10-02").get_data(as_text=True)
+    assert "Enviar todas as 🟢 (1)" in pagina
+    r = c.post("/respostas/enviar-positivas", data={"csrf": csrf, "data": "2026-10-02"}, follow_redirects=True)
+    assert "1 resposta(s) 🟢 enviada(s)" in r.get_data(as_text=True)
+    assert [t[0] for t in wa.textos] == [JOAO]
+    c.post("/respostas/enviar-positivas", data={"csrf": csrf, "data": "2026-10-02"})  # segundo clique: nada
+    assert len(wa.textos) == 1
+
+
+def test_lote_fora_das_24h_volta_para_revisao(engine):
+    _enviar_tudo(engine)
+    antiga = datetime.now(timezone.utc) - timedelta(hours=30)
+    _receber(engine, "Nota 10", quando=antiga)
+    respostas.processar_pendentes(engine, ClaudeFalso(), espera=timedelta(0))
+    wa = WhatsAppFalso()
+    res = respostas.enviar_positivas(engine, DIA, wa.enviar_texto)
+    assert res.enviadas == 0 and len(res.erros) == 1 and wa.textos == []
+    assert _resposta(engine).status == respostas.REVISAR
+
+
+def test_prompt_nao_obriga_frase_repetida():
+    from posvenda.ia import SISTEMA
+    assert "não em toda mensagem" in SISTEMA

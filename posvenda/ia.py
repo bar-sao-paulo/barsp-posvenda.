@@ -33,7 +33,10 @@ Resumo: até 15 palavras, sem ponto e vírgula.
 
 Resposta sugerida (WhatsApp, em nome da Thais):
 - Comece com "Oi, <primeiro nome>!" (ou "Oi!" sem nome). Tom humano, próximo, frases curtas, sem ponto e vírgula.
-- Use, quando couber, as frases da casa: "Sua opinião é muito importante para nós" e "Ficamos felizes que tenha gostado".
+- As frases da casa ("Sua opinião é muito importante para nós", "Ficamos felizes que tenha gostado") podem aparecer \
+de vez em quando, mas não em toda mensagem: as respostas do dia são lidas juntas e não podem soar iguais. Prefira \
+comentar algo específico do que o cliente escreveu e varie o agradecimento (ex.: "Obrigada por contar", "Adoramos \
+saber disso", "Valeu demais pelo retorno").
 - Elogio: agradeça e convide para voltar. Crítica: reconheça o problema específico, peça desculpas sem rodeios, \
 diga que levou ao gerente e que vai retornar.
 - Nunca prometa desconto, cortesia, brinde, reembolso ou nada grátis, nem se o cliente pedir.
