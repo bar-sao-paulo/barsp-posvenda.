@@ -55,6 +55,7 @@ Variáveis (só nomes; os valores ficam no Railway):
 | `ENVIO_AUTOMATICO`, `ENVIO_HORA` | `1` liga o envio diário; hora de São Paulo (padrão 11) |
 | `RESPOSTA_AUTOMATICA` | `1` deixa sair sozinha a resposta sem nenhum alerta (🔴 nunca sai) |
 | `ALERTA_EMAIL`, `RESEND_API_KEY`, `EMAIL_FROM`, `PAINEL_URL` | Opcionais; aviso por e-mail de crítica |
+| `PAINEL_API_TOKEN` | Opcional; texto aleatório longo que libera `GET /api/resumo` (só números, sem dados de cliente) para o painel financeiro |
 
 ## Testes
 
