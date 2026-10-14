@@ -96,8 +96,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
 
     @app.before_request
     def _csrf_e_login():
-        if request.endpoint in ("webhook_verificar", "webhook_receber"):
-            return None  # chamado pela Meta: protegido pela assinatura, sem login nem CSRF
+        if request.endpoint in ("webhook_verificar", "webhook_receber", "api_resumo"):
+            return None  # chamado pela Meta (assinatura) ou pelo painel financeiro (token): sem login nem CSRF
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
         if request.method == "POST":
@@ -119,6 +119,9 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             except ValueError:
                 flash("Data inválida; mostrando ontem.")
         return hoje() - timedelta(days=1)
+
+    from .api_resumo import registrar as registrar_api_resumo
+    registrar_api_resumo(app, engine=engine, hoje=hoje)
 
     @app.get("/saude")
     def saude():

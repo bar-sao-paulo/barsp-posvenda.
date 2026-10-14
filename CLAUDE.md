@@ -35,6 +35,7 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
 | `historico.py` | Compras do cliente nos últimos 12 meses (dias com comanda, tabela `visitas`), lidas do Takeat em blocos de 3 dias (`historico_blocos`) pelo agendador |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
+| `api_resumo.py` | `GET /api/resumo` (só leitura, `Authorization: Bearer PAINEL_API_TOKEN`): números do pós-venda por mês (enviadas, respostas, nota média, gravidades), sem nenhum dado de cliente, para o painel financeiro |
 | `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
 
 ## Convenções
