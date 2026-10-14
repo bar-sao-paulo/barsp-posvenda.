@@ -304,7 +304,7 @@ def test_espera_o_cliente_terminar_de_escrever(engine):
 
 def test_ambigua_vira_8_e_ressalva_vai_para_resumo_e_acao(engine):
     _enviar_tudo(engine)
-    _receber(engine, "👍")
+    _receber(engine, "ok")
     respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=10, estimada=True, ressalva="preço alto")),
                                   agora=AGORA)
     r = _resposta(engine)
@@ -482,3 +482,36 @@ def test_lote_fora_das_24h_volta_para_revisao(engine):
 def test_prompt_nao_obriga_frase_repetida():
     from posvenda.ia import SISTEMA
     assert "não em toda mensagem" in SISTEMA
+
+
+@pytest.mark.parametrize("textos", [["👍"], ["💗"], ["👍🏾"], ["Ótimo!"], ["boa tarde Thais, tudo certo"],
+                                    ["Oi", "Tava td bem"], ["Amei ❤️"], ["Muito bom, obrigada"]])
+def test_elogio_curto_e_positivo(textos):
+    assert respostas.eh_positiva_curta(textos)
+
+
+@pytest.mark.parametrize("textos", [["ok"], ["Oi"], ["Oi, boa tarde"], ["👎"], ["ótimo, mas demorou"],
+                                    ["Mensagem automática: estamos fora do horário"], ["😡"], ["bom, mas frio"]])
+def test_nao_e_elogio_curto(textos):
+    assert not respostas.eh_positiva_curta(textos)
+
+
+def test_elogio_curto_vira_9_estimada(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "boa tarde Thais, tudo certo")
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=8, estimada=True)), agora=AGORA)
+    r = _resposta(engine)
+    assert r.nota == 9 and r.gravidade == respostas.POSITIVO and r.nota_estimada
+
+
+def test_reavaliacao_unica_das_notas_8(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "❤️")
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=8, estimada=True)), agora=AGORA)
+    with engine.begin() as con:  # simula a análise antiga (regra do 8)
+        con.execute(t_respostas.update().values(nota=8, gravidade=respostas.ATENCAO))
+    claude = ClaudeFalso(analise(nota=8, estimada=True))
+    automacao.rodar_uma_vez(engine, automacao.Config(), classificar=claude, agora=AGORA)
+    assert _resposta(engine).nota == 9 and len(claude.chamadas) == 1
+    automacao.rodar_uma_vez(engine, automacao.Config(), classificar=claude, agora=AGORA)  # só uma vez
+    assert len(claude.chamadas) == 1
