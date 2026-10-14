@@ -8,7 +8,7 @@ Regras (instruções do projeto Pós-venda):
 - Resposta neutra ou ambígua ("ok", "oi", resposta automática): nota estimada 8 (🟡).
 - 🔴 nunca é respondida de forma automática: sai como "Revisar antes de enviar".
 - Nunca prometer compensação, nem usar o vocabulário proibido; no máximo 2 emojis.
-- Ordem da planilha: menor nota primeiro; no empate, nota real antes da estimada e, depois, quem tem mais visitas.
+- Ordem da planilha: menor nota primeiro; no empate, nota real antes da estimada e, depois, quem tem mais compras no bar nos últimos 12 meses.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from sqlalchemy import and_, insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from . import lista
+from . import historico, lista
 from .db import envios, mensagens, respostas
 from .ia import Analise, IAErro
 
@@ -86,12 +86,7 @@ def _utc(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def chave_telefone(telefone: str) -> str:
-    """DDD + 8 últimos dígitos. O WhatsApp às vezes manda celular brasileiro sem o 9 (55 11 8765-4321)."""
-    d = re.sub(r"\D", "", telefone or "")
-    if d.startswith("55") and len(d) in (12, 13):
-        d = d[2:]
-    return d[:2] + d[-8:] if len(d) in (10, 11) else d
+chave_telefone = lista.chave_telefone
 
 
 def gravidade(nota: int | None) -> str:
@@ -212,15 +207,8 @@ def atualizar_situacao(engine: Engine, wa_id: str, status: str, erro: str = "") 
 
 # --------------------------------------------------------------------------- análise e resposta
 def historico_cliente(engine: Engine, envio: dict[str, Any]) -> tuple[str, int]:
-    """Visitas registradas no pós-venda para o mesmo telefone (o Takeat não dá o histórico ainda)."""
-    chave = chave_telefone(envio["telefone"])
-    with engine.connect() as con:
-        datas = sorted({r.data_visita for r in con.execute(
-            select(envios.c.telefone, envios.c.data_visita).where(envios.c.enviado_em.is_not(None)))
-            if chave_telefone(r.telefone) == chave})
-    if len(datas) <= 1:
-        return "sem histórico", len(datas)
-    return f"{len(datas)} visitas desde {datas[0]:%d/%m/%Y}", len(datas)
+    """Compras do cliente no bar nos 12 meses até a visita (histórico de comandas do Takeat)."""
+    return historico.compras(engine, [(envio["telefone"], envio["data_visita"])])[0]
 
 
 def textos_do_cliente(engine: Engine, envio_id: int) -> list[str]:
@@ -394,7 +382,7 @@ COLUNAS = ["Data", "Cliente", "Telefone", "Origem", "Prato/pedido", "Versão", "
            "Resumo", "Histórico", "Resposta sugerida", "Ação sugerida", "Status"]
 
 
-def listar(engine: Engine, de: date, ate: date) -> list[dict[str, Any]]:
+def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> list[dict[str, Any]]:
     """Respostas das visitas entre `de` e `ate`, da mais crítica para a menos crítica."""
     with engine.connect() as con:
         rows = [dict(r._mapping) for r in con.execute(
@@ -402,8 +390,10 @@ def listar(engine: Engine, de: date, ate: date) -> list[dict[str, Any]]:
                    envios.c.origem, envios.c.prato, envios.c.versao)
             .join(envios, envios.c.id == respostas.c.envio_id)
             .where(and_(envios.c.data_visita >= de, envios.c.data_visita <= ate)))]
+    for r, (txt, n) in zip(rows, historico.compras(engine, [(r["telefone"], r["data_visita"]) for r in rows],
+                                                    hoje)):
+        r["historico"], r["visitas"] = txt, n
     for r in rows:
-        r["visitas"] = historico_cliente(engine, r)[1]
         r["textos"] = textos_do_cliente(engine, r["envio_id"])
     rows.sort(key=lambda r: (r["nota"] if r["nota"] is not None else -1, bool(r["nota_estimada"]), -r["visitas"]))
     return rows

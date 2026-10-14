@@ -92,6 +92,21 @@ respostas = Table(
     Column("alerta_em", DateTime(timezone=True)),
 )
 
+# Dias em que cada telefone teve comanda no bar (histórico de compras, últimos 12 meses).
+# Só a chave do telefone (DDD + 8 últimos dígitos) e o dia, nada do pedido.
+visitas = Table(
+    "visitas", metadata,
+    Column("chave", String(20), primary_key=True),
+    Column("dia", Date, primary_key=True),
+)
+
+# Blocos de 3 dias do histórico já lidos no Takeat (início do bloco).
+historico_blocos = Table(
+    "historico_blocos", metadata,
+    Column("inicio", Date, primary_key=True),
+    Column("carregado_em", DateTime(timezone=True), nullable=False),
+)
+
 # Trava das rotinas automáticas (ex.: "envio:2026-10-02"), para não rodar duas vezes.
 rotinas = Table(
     "rotinas", metadata,

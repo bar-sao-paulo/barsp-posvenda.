@@ -11,7 +11,7 @@ from typing import Any, Callable
 from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import Engine
 
-from . import lista
+from . import historico, lista
 from .db import bloqueios, buscas, envios, nao_enviados
 
 # (inicio_utc, fim_utc) -> comandas do Takeat
@@ -68,7 +68,9 @@ def gerar_lista(engine: Engine, dia: date, buscar: BuscarSessoes, *, hoje: date 
     e quem já tinha versão sorteada mantém a versão."""
     hoje = hoje or hoje_local()
     inicio, fim = lista.janela_utc(dia)
-    candidatos = lista.clientes_do_dia(buscar(inicio, fim), dia)
+    sessoes = buscar(inicio, fim)
+    historico.gravar(engine, sessoes, dia, dia)
+    candidatos = lista.clientes_do_dia(sessoes, dia)
     ficam, fora = lista.filtrar(candidatos, enviados_ultimos_7_dias(engine, dia), telefones_bloqueados(engine))
 
     with engine.begin() as con:
