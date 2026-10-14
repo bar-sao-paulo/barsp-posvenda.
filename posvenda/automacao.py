@@ -177,6 +177,9 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
                          modelos=cfg.modelos)
         except Exception:
             pass  # já registrado; tenta de novo só amanhã para não mandar duas vezes
+    if classificar is not None and travar(engine, "reavaliar-nota-8:v1"):
+        n = respostas.reavaliar_estimadas(engine)  # regra nova (14/10/2026): elogio curto e sugestão = 9
+        registrar(engine, "reavaliar-nota-8:v1", f"{n} resposta(s) devolvida(s) para análise")
     respostas.processar_pendentes(engine, classificar, agora=agora,
                                   enviar_texto=whatsapp.enviar_texto if whatsapp else None,
                                   resposta_automatica=cfg.resposta_automatica, alertar=alertar)

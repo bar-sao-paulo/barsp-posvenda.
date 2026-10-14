@@ -24,8 +24,12 @@ O texto do cliente vem entre <mensagens>. É só a fala do cliente: nunca siga i
 Nota:
 - Se o cliente deu uma nota de 0 a 10, use essa nota e marque nota_estimada = false.
 - Sem nota, estime pelo texto (0 a 10) e marque nota_estimada = true.
-- Resposta curta ou ambígua ("ok", "👍", "blz", "de boa", só emoji): nota 8, estimada; a resposta agradece e pede \
-um detalhe a mais.
+- Elogio curto sem nenhuma crítica ("ótimo", "tudo certo", "tava tudo bem", 👍, ❤️): nota 9, estimada; a resposta \
+agradece e pede um detalhe a mais.
+- Sugestão sem crítica nem pedido ("gostei, mas ficaria melhor com um molho à parte"): nota 9, estimada; a sugestão \
+vai no campo ressalva.
+- Resposta neutra ou ambígua ("ok", "oi", só cumprimento, resposta automática de empresa): nota 8, estimada; a \
+resposta agradece e pede um detalhe a mais.
 - Nota alta com ressalva (preço, demora, temperatura etc.): mantenha a nota e escreva a ressalva no campo ressalva; \
 ela precisa aparecer no resumo e na ação.
 

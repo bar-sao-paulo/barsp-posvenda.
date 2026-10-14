@@ -3,7 +3,9 @@
 Regras (instruções do projeto Pós-venda):
 - Cada resposta é ligada ao cliente pelo telefone; número que não está na lista fica em "Fora da lista".
 - Gravidade: 🔴 Crítico = nota 0 a 5 | 🟡 Atenção = 6 a 8 | 🟢 Positivo = 9 e 10.
-- Resposta curta ou ambígua: nota estimada 8 (🟡).
+- Resposta curta só de elogio ("ótimo", "tudo certo", 👍, ❤️), sem crítica: nota estimada 9 (🟢).
+  Sugestão sem crítica nem pedido: nota estimada 9 (decidido pelo Emerson em 14/10/2026).
+- Resposta neutra ou ambígua ("ok", "oi", resposta automática): nota estimada 8 (🟡).
 - 🔴 nunca é respondida de forma automática: sai como "Revisar antes de enviar".
 - Nunca prometer compensação, nem usar o vocabulário proibido; no máximo 2 emojis.
 - Ordem da planilha: menor nota primeiro; no empate, nota real antes da estimada e, depois, quem tem mais visitas.
@@ -48,6 +50,28 @@ _COMPENSACAO = re.compile(r"\b(desconto|cortesia|brinde|reembols\w*|estorn\w*|gr
                           r"devolu[cç][aã]o|devolver (o|seu) dinheiro|voucher|cupom)\b", re.IGNORECASE)
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F2FF]")
 _AMBIGUAS = {"ok", "okay", "blz", "beleza", "de boa", "td bem", "tudo bem", "show", "top", "certo", "ta", "sim"}
+
+# Elogio curto: o que sobra depois de tirar cumprimentos precisa ser uma destas expressões (ou só emoji positivo).
+_POSITIVAS = {"otimo", "otima", "tudo certo", "tudo bem", "tudo otimo", "tudo perfeito", "tudo bom", "perfeito",
+              "perfeita", "excelente", "bom", "boa", "show", "top", "maravilha", "maravilhoso", "maravilhosa",
+              "adorei", "amei", "gostei", "gostamos", "amamos", "adoramos", "joia", "beleza", "blz", "de boa",
+              "massa", "sensacional", "nota mil", "tudo top", "tudo show", "tudo maravilhoso", "delicia", "uma delicia"}
+_CUMPRIMENTOS = re.compile(r"\b(oi+|ola|opa|bom dia|boa tarde|boa noite|thais|obrigad[oa]s?|valeu|e ai|"
+                           r"tava|estava|estavam|esta|ta|foi|foram|muito|mt|mto|sim|tambem|tb|e|o|a|os|as|de novo)\b")
+_EMOJI_POSITIVO = set("👍👌👏🙌🙏❤💖💗💕💓💞💘💝💛💚💙💜🧡🤍😍🥰😘😊😁😀😃😄🙂☺🤩😋🔥💯⭐🌟✨✅🍺🍻🥂")
+
+
+def eh_positiva_curta(textos: list[str]) -> bool:
+    """Só elogio curto, sem crítica ("ótimo", "tava td bem", "boa tarde Thais, tudo certo", 👍, ❤️)."""
+    junto = " ".join(textos)
+    emojis = [c for c in junto if _EMOJI.match(c) and not 0x1F3FB <= ord(c) <= 0x1F3FF]
+    if any(c not in _EMOJI_POSITIVO for c in emojis):
+        return False  # emoji triste, bravo etc.
+    texto = re.sub(r"[^\w\s]", " ", lista.sem_acento(_EMOJI.sub(" ", junto)).lower())
+    texto = re.sub(r"\btd\b", "tudo", texto)
+    texto = " ".join(_CUMPRIMENTOS.sub(" ", texto).split())
+    return texto in _POSITIVAS or (not texto and bool(emojis))
+
 
 Classificar = Callable[[dict[str, Any], list[str], str], Analise]
 
@@ -221,8 +245,11 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
                        classificada_em=agora_utc())
     else:
         nota = a.nota
-        if a.nota_estimada and eh_ambigua(textos):
-            nota = 8
+        if a.nota_estimada:
+            if eh_positiva_curta(textos):
+                nota = 9
+            elif eh_ambigua(textos):
+                nota = 8
         g = gravidade(nota)
         resumo = a.resumo.replace(";", ",")
         acao = a.acao_sugerida.replace(";", ",")
@@ -276,6 +303,15 @@ def enviar_resposta(engine: Engine, resposta_id: int, texto: str, enviar_texto: 
     with engine.begin() as con:
         con.execute(update(respostas).where(respostas.c.id == resposta_id).values(
             status=RESPONDIDO, respondida_em=agora, resposta_sugerida=texto))
+
+
+def reavaliar_estimadas(engine: Engine) -> int:
+    """Devolve para análise as 🟡 com nota 8 estimada ainda não respondidas (regra nova da nota 9).
+    Rodada uma única vez pelo agendador (trava em `rotinas`)."""
+    with engine.begin() as con:
+        return con.execute(update(respostas).where(and_(
+            respostas.c.nota == 8, respostas.c.nota_estimada.is_(True), respostas.c.respondida_em.is_(None),
+            respostas.c.status.in_([PODE_ENVIAR, REVISAR]))).values(status=AGUARDANDO)).rowcount
 
 
 ENVIANDO = "Enviando"
