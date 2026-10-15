@@ -147,6 +147,11 @@ def obter_lista(engine: Engine, dia: date) -> ListaDoDia:
     return ListaDoDia(dia, busca, es, ns)
 
 
+def telefone_do_envio(engine: Engine, envio_id: int) -> str | None:
+    with engine.connect() as con:
+        return con.execute(select(envios.c.telefone).where(envios.c.id == envio_id)).scalar()
+
+
 def marcar_enviado(engine: Engine, envio_id: int, mensagem: str | None = None) -> bool:
     valores: dict[str, Any] = {"enviado_em": agora()}
     if mensagem and mensagem.strip():
