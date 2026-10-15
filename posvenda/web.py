@@ -253,7 +253,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         for m in recebidas:
             try:
                 respostas.registrar_recebida(engine, m.telefone, m.texto, m.wa_id, m.quando,
-                                             enviar_texto=wa.enviar_texto if wa else None, bloquear=_bloquear)
+                                             enviar_texto=wa.enviar_texto if wa else None, bloquear=_bloquear,
+                                             midia_id=m.midia_id, midia_tipo=m.midia_tipo)
             except Exception:
                 log.exception("Falha ao gravar mensagem recebida")
         for st in situacoes:
@@ -289,6 +290,31 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             except (respostas.RespostaErro, WhatsAppErro) as exc:
                 flash(str(exc))
         return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+
+    @app.post("/respostas/<int:resposta_id>/audio")
+    def respostas_audio(resposta_id: int):
+        try:
+            respostas.escrever_audio(engine, resposta_id, request.form.get("texto", ""))
+            flash("Anotado. A IA refaz a nota e a resposta em instantes (recarregue a página).")
+        except respostas.RespostaErro as exc:
+            flash(str(exc))
+        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+
+    @app.get("/midia/<int:mensagem_id>")
+    def midia(mensagem_id: int):
+        """Toca o áudio (ou mostra a foto) do cliente, buscando na Meta na hora. O arquivo não é guardado."""
+        midia_id = respostas.midia_da_mensagem(engine, mensagem_id)
+        if not midia_id or wa is None:
+            abort(404)
+        try:
+            conteudo, tipo = wa.baixar_midia(midia_id)
+        except WhatsAppErro as exc:
+            log.warning("Mídia %s indisponível: %s", mensagem_id, exc)
+            return Response("A Meta não tem mais esse arquivo (ela guarda por pouco tempo).", status=410,
+                            mimetype="text/plain")
+        if not tipo.startswith(("audio/", "image/")):
+            abort(415)
+        return Response(conteudo, mimetype=tipo, headers={"Cache-Control": "private, no-store"})
 
     @app.post("/respostas/<int:resposta_id>/ignorar")
     def respostas_ignorar(resposta_id: int):
@@ -467,7 +493,14 @@ function abrir(id, tel) {
 <span class="quieto">{{ r.prato or 'seu pedido' }} · {{ mascarar(r.telefone) }} · 🛒 {{ r.historico }}</span></div>
 {% if r.itens %}<p class="quieto"><b>Consumiu:</b> {{ r.itens }}</p>{% endif %}
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
-{% for t in r.textos %}<div class="fala">{{ t }}</div>{% endfor %}
+{% for f in r.falas %}{% if f.direcao == 'equipe' %}<div class="fala"><span class="quieto">No áudio (escrito pela equipe):</span> {{ f.texto }}</div>
+{% elif f.midia_id and f.midia_tipo == 'audio' %}<div class="fala">🎤 Áudio{% if wa_ok %} <audio controls preload="none" src="{{ url_for('midia', mensagem_id=f.id) }}"></audio>{% endif %}</div>
+{% elif f.midia_id and f.midia_tipo == 'image' %}<div class="fala">📷 Foto{% if wa_ok %} <a href="{{ url_for('midia', mensagem_id=f.id) }}" target="_blank" rel="noopener">abrir</a>{% endif %}{{ f.texto[6:] }}</div>
+{% else %}<div class="fala">{{ f.texto }}</div>{% endif %}{% endfor %}
+{% if r.audio_pendente %}<form method="post" action="{{ url_for('respostas_audio', resposta_id=r.id) }}" class="cli">
+<input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<textarea name="texto" aria-label="O que o cliente disse no áudio" placeholder="Ouça o áudio e escreva aqui o que o cliente disse. A IA refaz a nota e a resposta."></textarea>
+<div class="linha"><button class="btn2">Salvar o que o cliente disse</button></div></form>{% endif %}
 {% if r.resumo %}<p><b>Resumo:</b> {{ r.resumo }}</p>{% endif %}
 {% if r.motivo_revisao %}<p class="erro">Revisar: {{ r.motivo_revisao }}</p>{% endif %}
 {% if r.acao_sugerida %}<p><b>Ação sugerida:</b> {{ r.acao_sugerida }}</p>{% endif %}
