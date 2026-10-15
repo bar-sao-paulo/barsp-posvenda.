@@ -1,8 +1,9 @@
 """Comandas falsas no formato de GET /v1/table-sessions (nomes e telefones fictícios)."""
 
 
-def pedido(nome, preco, cancelado=False):
-    return {"product": {"name": nome}, "price": f"{preco:.2f}", "canceled_at": "2026-10-02T20:00:00Z" if cancelado else None}
+def pedido(nome, preco, cancelado=False, qtd=1):
+    return {"product": {"name": nome}, "price": f"{preco:.2f}", "amount": qtd,
+            "canceled_at": "2026-10-02T20:00:00Z" if cancelado else None}
 
 
 def conta(nome, telefone, *itens):

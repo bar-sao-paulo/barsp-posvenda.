@@ -31,6 +31,8 @@ envios = Table(
     Column("wa_message_id", String(100)),
     Column("wa_status", String(20)),
     Column("erro", String(300)),
+    # Tudo o que o cliente consumiu no dia (vazio = comanda não encontrada; nulo = ainda não buscado).
+    Column("itens", Text),
     UniqueConstraint("data_visita", "telefone", name="uq_envio_dia_telefone"),
 )
 
@@ -117,7 +119,7 @@ rotinas = Table(
 
 # Colunas criadas depois que a tabela já existia no Railway (migração simples por ALTER TABLE).
 _COLUNAS_NOVAS = {
-    "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)"},
+    "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)", "itens": "TEXT"},
 }
 
 

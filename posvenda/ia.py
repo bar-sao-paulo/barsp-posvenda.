@@ -90,6 +90,7 @@ def montar_contexto(cliente: dict[str, Any], textos: list[str], historico: str) 
         f"Primeiro nome: {cliente.get('nome') or 'sem nome'}",
         f"Origem: {cliente.get('origem')}",
         f"Prato/pedido: {cliente.get('prato') or 'seu pedido'}",
+        f"Tudo o que consumiu: {cliente.get('itens') or 'não informado'}",
         f"Versão da pesquisa: {cliente.get('versao')}",
         f"Histórico: {historico}",
         "</cliente>",

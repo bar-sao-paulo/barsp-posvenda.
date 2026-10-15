@@ -186,6 +186,7 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
                                   resposta_automatica=cfg.resposta_automatica, alertar=alertar)
     if buscar is not None:  # histórico de compras: poucos blocos de 3 dias por minuto até fechar 12 meses
         try:
+            servico.preencher_itens(engine, buscar, agora.astimezone(lista.TZ).date())  # itens das listas antigas
             historico.carregar(engine, buscar, agora.astimezone(lista.TZ).date(), agora=agora)
         except Exception as exc:
             log.warning("Histórico de compras: falha ao ler o Takeat (%s); tento de novo no próximo minuto.", exc)
