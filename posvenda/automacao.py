@@ -212,6 +212,9 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     if classificar is not None and travar(engine, "reavaliar-nota-8:v1"):
         n = respostas.reavaliar_estimadas(engine)  # regra nova (14/10/2026): elogio curto e sugestão = 9
         registrar(engine, "reavaliar-nota-8:v1", f"{n} resposta(s) devolvida(s) para análise")
+    if travar(engine, "revisar-audios:v1"):  # áudios analisados antes da trava do áudio (15/10/2026)
+        n = respostas.revisar_audios_antigos(engine)
+        registrar(engine, "revisar-audios:v1", f"{n} resposta(s) com áudio sem texto foram para revisão")
     if transcrever is not None and whatsapp is not None:  # antes da análise, para a IA já ler o que foi dito
         try:
             transcrever_audios(engine, whatsapp.baixar_midia, transcrever, agora)

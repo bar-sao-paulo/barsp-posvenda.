@@ -112,3 +112,19 @@ def test_painel_toca_o_audio_e_recebe_o_texto(app_wa, engine):
     pagina = c.get("/respostas?data=2026-10-02").get_data(as_text=True)
     assert "No áudio (escrito pela equipe):</span> Tudo ótimo" in pagina
     assert "Salvar o que o cliente disse" not in pagina
+
+
+def test_audio_antigo_ja_analisado_vai_para_revisao_uma_vez(engine):
+    from posvenda import automacao
+    _enviar_tudo(engine)
+    respostas.registrar_recebida(engine, JOAO, "[áudio]", "wamid.velho", AGORA - timedelta(hours=1))  # sem midia_id
+    rid = _resposta(engine).id
+    with engine.begin() as con:  # como ficou antes da trava: "Pode enviar"
+        con.execute(update(t_respostas).values(status=respostas.PODE_ENVIAR, motivo_revisao=""))
+    automacao.rodar_uma_vez(engine, automacao.Config(), agora=AGORA)
+    r = _resposta(engine)
+    assert r.id == rid and r.status == respostas.REVISAR and "ouça e escreva" in r.motivo_revisao
+    with engine.begin() as con:
+        con.execute(update(t_respostas).values(status=respostas.PODE_ENVIAR))
+    automacao.rodar_uma_vez(engine, automacao.Config(), agora=AGORA)  # roda uma vez só
+    assert _resposta(engine).status == respostas.PODE_ENVIAR
