@@ -49,6 +49,14 @@ def _classificador():
     return Classificador()
 
 
+def _transcritor():
+    chave = os.environ.get("OPENAI_API_KEY")
+    if not chave:
+        return None
+    from .transcricao import MODELO_PADRAO, Transcritor
+    return Transcritor(chave, modelo=os.environ.get("TRANSCRICAO_MODELO", MODELO_PADRAO))
+
+
 def _alerta():
     destino, chave, remetente = (os.environ.get(x) for x in ("ALERTA_EMAIL", "RESEND_API_KEY", "EMAIL_FROM"))
     if not (destino and chave and remetente):
@@ -85,7 +93,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     # O agendador só liga no Railway (criar_app() sem argumentos); nos testes fica desligado.
     if agendador if agendador is not None else producao:
         automacao.iniciar_agendador(engine, cfg, buscar=buscar, whatsapp=wa, classificar=classificador,
-                                    alertar=_alerta())
+                                    alertar=_alerta(), transcrever=_transcritor())
     app.config["POSVENDA_CFG"] = cfg
 
     def _bloquear(telefone: str) -> None:
@@ -494,6 +502,7 @@ function abrir(id, tel) {
 {% if r.itens %}<p class="quieto"><b>Consumiu:</b> {{ r.itens }}</p>{% endif %}
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
 {% for f in r.falas %}{% if f.direcao == 'equipe' %}<div class="fala"><span class="quieto">No áudio (escrito pela equipe):</span> {{ f.texto }}</div>
+{% elif f.direcao == 'transcrito' %}<div class="fala"><span class="quieto">No áudio (transcrição automática, confira ouvindo):</span> {{ f.texto }}</div>
 {% elif f.midia_id and f.midia_tipo == 'audio' %}<div class="fala">🎤 Áudio{% if wa_ok %} <audio controls preload="none" src="{{ url_for('midia', mensagem_id=f.id) }}"></audio>{% endif %}</div>
 {% elif f.midia_id and f.midia_tipo == 'image' %}<div class="fala">📷 Foto{% if wa_ok %} <a href="{{ url_for('midia', mensagem_id=f.id) }}" target="_blank" rel="noopener">abrir</a>{% endif %}{{ f.texto[6:] }}</div>
 {% else %}<div class="fala">{{ f.texto }}</div>{% endif %}{% endfor %}

@@ -214,6 +214,8 @@ def historico_cliente(engine: Engine, envio: dict[str, Any]) -> tuple[str, int]:
 
 
 PREFIXO_AUDIO = "O cliente disse no áudio (escrito pela equipe): "
+PREFIXO_TRANSCRITO = "O cliente disse no áudio (transcrição automática): "
+ANOTACOES = ("equipe", "transcrito")  # texto de um áudio: escrito por alguém da equipe ou pela transcrição
 
 
 def falas_do_cliente(engine: Engine, envio_id: int) -> list[dict[str, Any]]:
@@ -221,7 +223,18 @@ def falas_do_cliente(engine: Engine, envio_id: int) -> list[dict[str, Any]]:
     with engine.connect() as con:
         return [dict(r._mapping) for r in con.execute(
             select(mensagens.c.id, mensagens.c.texto, mensagens.c.direcao, mensagens.c.midia_id, mensagens.c.midia_tipo)
-            .where(and_(mensagens.c.envio_id == envio_id, mensagens.c.direcao.in_(("entrada", "equipe"))))
+            .where(and_(mensagens.c.envio_id == envio_id, mensagens.c.direcao.in_(("entrada", *ANOTACOES))))
+            .order_by(mensagens.c.criado_em, mensagens.c.id))]
+
+
+def audios_para_transcrever(engine: Engine, desde: datetime) -> list[dict[str, Any]]:
+    """Áudios de clientes da lista (com resposta) que chegaram depois de `desde`, do mais antigo ao mais novo."""
+    with engine.connect() as con:
+        return [dict(r._mapping) for r in con.execute(
+            select(mensagens.c.id, mensagens.c.midia_id, respostas.c.id.label("resposta_id"))
+            .join(respostas, respostas.c.envio_id == mensagens.c.envio_id)
+            .where(and_(mensagens.c.direcao == "entrada", mensagens.c.midia_tipo == "audio",
+                        mensagens.c.midia_id.is_not(None), mensagens.c.criado_em >= desde))
             .order_by(mensagens.c.criado_em, mensagens.c.id))]
 
 
@@ -232,20 +245,22 @@ def midia_da_mensagem(engine: Engine, mensagem_id: int) -> str | None:
 
 
 def textos_do_cliente(engine: Engine, envio_id: int) -> list[str]:
-    return [(PREFIXO_AUDIO if f["direcao"] == "equipe" else "") + f["texto"] for f in falas_do_cliente(engine, envio_id)]
+    prefixo = {"equipe": PREFIXO_AUDIO, "transcrito": PREFIXO_TRANSCRITO}
+    return [prefixo.get(f["direcao"], "") + f["texto"] for f in falas_do_cliente(engine, envio_id)]
 
 
 def audio_sem_texto(falas: list[dict[str, Any]]) -> bool:
     """Áudio que ninguém ouviu ainda: a IA não entende áudio, então a nota não pode sair sozinha."""
     audios = sum(1 for f in falas if f["direcao"] == "entrada" and (f.get("midia_tipo") == "audio"
                                                                     or f["texto"].startswith("[áudio]")))
-    escritos = sum(1 for f in falas if f["direcao"] == "equipe")
+    escritos = sum(1 for f in falas if f["direcao"] in ANOTACOES)
     return audios > escritos
 
 
-def escrever_audio(engine: Engine, resposta_id: int, texto: str, agora: datetime | None = None) -> None:
-    """Grava o que o cliente disse no áudio (ouvido pela equipe) e manda a resposta para nova análise.
-    Não mexe no prazo de 24 h, que conta da última mensagem do próprio cliente."""
+def escrever_audio(engine: Engine, resposta_id: int, texto: str, agora: datetime | None = None,
+                   direcao: str = "equipe") -> None:
+    """Grava o que o cliente disse no áudio (ouvido pela equipe ou transcrito) e manda a resposta para nova
+    análise. Não mexe no prazo de 24 h, que conta da última mensagem do próprio cliente."""
     texto = " ".join((texto or "").split())
     if not texto:
         raise RespostaErro("Escreva o que o cliente disse no áudio.")
@@ -254,7 +269,7 @@ def escrever_audio(engine: Engine, resposta_id: int, texto: str, agora: datetime
                         .join(envios, envios.c.id == respostas.c.envio_id).where(respostas.c.id == resposta_id)).first()
         if r is None:
             raise RespostaErro("Resposta não encontrada.")
-        con.execute(insert(mensagens).values(telefone=r.telefone, envio_id=r.envio_id, direcao="equipe",
+        con.execute(insert(mensagens).values(telefone=r.telefone, envio_id=r.envio_id, direcao=direcao,
                                              texto=texto[:2000], criado_em=agora or agora_utc()))
         if r.status in (REVISAR, PODE_ENVIAR):
             con.execute(update(respostas).where(respostas.c.id == resposta_id).values(status=AGUARDANDO))

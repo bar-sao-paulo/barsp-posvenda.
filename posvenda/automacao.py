@@ -5,6 +5,7 @@ A cada minuto:
   WhatsApp com os modelos aprovados na Meta (só com ENVIO_AUTOMATICO=1). Uma vez por dia (trava em `rotinas`).
 - Analisa as respostas que chegaram (Claude), avisa as críticas 🔴 por e-mail e, com RESPOSTA_AUTOMATICA=1,
   responde sozinho só as que não precisam de revisão.
+- Transcreve os áudios dos clientes (com OPENAI_API_KEY), antes da análise.
 - Lê aos poucos o histórico de comandas dos últimos 12 meses (número de compras de cada cliente).
 """
 from __future__ import annotations
@@ -147,6 +148,36 @@ def alerta_por_email(destino: str, chave_resend: str, remetente: str, painel_url
     return alertar
 
 
+# --------------------------------------------------------------------------- transcrição dos áudios
+def transcrever_audios(engine: Engine, baixar: Callable[[str], tuple[bytes, str]],
+                       transcrever: Callable[[bytes, str], str], agora: datetime, *, limite: int = 3) -> int:
+    """Transcreve os áudios novos (últimos 7 dias). Cada áudio é tentado uma vez (trava em `rotinas`); se falhar,
+    continua aparecendo para a equipe ouvir e escrever. Devolve quantos foram transcritos."""
+    feitos = 0
+    with engine.connect() as con:
+        tentados = {r[0] for r in con.execute(select(rotinas.c.chave).where(rotinas.c.chave.like("transcrever:%")))}
+    for a in respostas.audios_para_transcrever(engine, agora - timedelta(days=7)):
+        if feitos >= limite:
+            break
+        chave = f"transcrever:{a['id']}"
+        if chave in tentados or not travar(engine, chave):
+            continue
+        try:
+            conteudo, tipo = baixar(a["midia_id"])
+            texto = transcrever(conteudo, tipo)
+            if not texto.strip():
+                registrar(engine, chave, "áudio sem fala")
+                continue
+            respostas.escrever_audio(engine, a["resposta_id"], texto, agora=agora, direcao="transcrito")
+        except Exception as exc:
+            log.warning("Transcrição do áudio %s falhou: %s", a["id"], exc)
+            registrar(engine, chave, f"erro: {exc}")
+            continue
+        registrar(engine, chave, "ok")
+        feitos += 1
+    return feitos
+
+
 # --------------------------------------------------------------------------- agendador
 @dataclass
 class Config:
@@ -170,7 +201,7 @@ class Config:
 
 
 def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, classificar=None, alertar=None,
-                  agora: datetime | None = None) -> None:
+                  transcrever=None, agora: datetime | None = None) -> None:
     agora = agora or servico.agora()
     if cfg.envio_automatico and buscar is not None and whatsapp is not None:
         try:
@@ -181,6 +212,11 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     if classificar is not None and travar(engine, "reavaliar-nota-8:v1"):
         n = respostas.reavaliar_estimadas(engine)  # regra nova (14/10/2026): elogio curto e sugestão = 9
         registrar(engine, "reavaliar-nota-8:v1", f"{n} resposta(s) devolvida(s) para análise")
+    if transcrever is not None and whatsapp is not None:  # antes da análise, para a IA já ler o que foi dito
+        try:
+            transcrever_audios(engine, whatsapp.baixar_midia, transcrever, agora)
+        except Exception:
+            log.exception("Transcrição dos áudios falhou")
     respostas.processar_pendentes(engine, classificar, agora=agora,
                                   enviar_texto=whatsapp.enviar_texto if whatsapp else None,
                                   resposta_automatica=cfg.resposta_automatica, alertar=alertar)
