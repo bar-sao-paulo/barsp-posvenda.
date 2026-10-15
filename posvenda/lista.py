@@ -145,6 +145,7 @@ class Candidato:
     origem: str  # "Salão" ou "Delivery"
     prato: str | None
     ifood: bool
+    itens: str = ""  # tudo o que a pessoa consumiu no dia ("2x Chopp Brahma · 1x Picanha Cheff")
 
 
 def janela_utc(dia: date) -> tuple[datetime, datetime]:
@@ -192,9 +193,36 @@ def prato_principal(bill: dict[str, Any]) -> str | None:
     return melhor
 
 
+def _quantidade(valor: Any) -> int:
+    try:
+        return max(int(valor), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def itens_da_conta(bill: dict[str, Any]) -> dict[str, int]:
+    """Itens não cancelados da conta, somando a quantidade (`amount`) de cada produto, na ordem do pedido."""
+    itens: dict[str, int] = {}
+    for cesta in bill.get("order_baskets") or []:
+        if cesta.get("canceled_at"):
+            continue
+        for pedido in cesta.get("orders") or []:
+            if pedido.get("canceled_at"):
+                continue
+            nome = re.sub(r"\s+", " ", ((pedido.get("product") or {}).get("name")) or "").strip()
+            if nome:
+                itens[nome] = itens.get(nome, 0) + _quantidade(pedido.get("amount"))
+    return itens
+
+
+def texto_dos_itens(itens: dict[str, int]) -> str:
+    return " · ".join(f"{n}x {nome}" for nome, n in itens.items())
+
+
 def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candidato]:
     """Um candidato por conta (bill) das comandas abertas no dia (horário de São Paulo)."""
     saida: list[Candidato] = []
+    por_telefone: dict[str | None, list[dict[str, int]]] = {}
     for s in sorted(sessoes, key=lambda x: x.get("start_time") or ""):
         if (s.get("status") or "").lower() == "canceled" or s.get("delivery_canceled_at"):
             continue
@@ -213,7 +241,18 @@ def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candid
                 origem=origem,
                 prato=prato_principal(bill),
                 ifood=ifood,
+                itens=texto_dos_itens(itens_da_conta(bill)),
             ))
+            por_telefone.setdefault(saida[-1].telefone, []).append(itens_da_conta(bill))
+    # Mesmo telefone em várias contas do dia: o cartão mostra tudo o que a pessoa consumiu.
+    for c in saida:
+        contas = por_telefone.get(c.telefone) if c.telefone else None
+        if contas and len(contas) > 1:
+            soma: dict[str, int] = {}
+            for itens in contas:
+                for nome, n in itens.items():
+                    soma[nome] = soma.get(nome, 0) + n
+            c.itens = texto_dos_itens(soma)
     return saida
 
 

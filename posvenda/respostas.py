@@ -378,8 +378,8 @@ def processar_pendentes(engine: Engine, classificar: Classificar | None, *, agor
 
 
 # --------------------------------------------------------------------------- planilha
-COLUNAS = ["Data", "Cliente", "Telefone", "Origem", "Prato/pedido", "Versão", "Nota", "Nota estimada", "Gravidade",
-           "Resumo", "Histórico", "Resposta sugerida", "Ação sugerida", "Status"]
+COLUNAS = ["Data", "Cliente", "Telefone", "Origem", "Prato/pedido", "Itens consumidos", "Versão", "Nota",
+           "Nota estimada", "Gravidade", "Resumo", "Histórico", "Resposta sugerida", "Ação sugerida", "Status"]
 
 
 def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> list[dict[str, Any]]:
@@ -387,7 +387,7 @@ def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> lis
     with engine.connect() as con:
         rows = [dict(r._mapping) for r in con.execute(
             select(respostas, envios.c.data_visita, envios.c.nome_completo, envios.c.nome, envios.c.telefone,
-                   envios.c.origem, envios.c.prato, envios.c.versao)
+                   envios.c.origem, envios.c.prato, envios.c.versao, envios.c.itens)
             .join(envios, envios.c.id == respostas.c.envio_id)
             .where(and_(envios.c.data_visita >= de, envios.c.data_visita <= ate)))]
     for r, (txt, n) in zip(rows, historico.compras(engine, [(r["telefone"], r["data_visita"]) for r in rows],
@@ -425,7 +425,7 @@ def planilha_csv(rows: list[dict[str, Any]]) -> str:
     for r in rows:
         w.writerow([_campo(x) for x in (
             f"{r['data_visita']:%d/%m/%Y}", r["nome_completo"] or r["nome"] or "", r["telefone"], r["origem"],
-            r["prato"] or "seu pedido", r["versao"] or "—", r["nota"] if r["nota"] is not None else "",
+            r["prato"] or "seu pedido", r.get("itens") or "", r["versao"] or "—", r["nota"] if r["nota"] is not None else "",
             ("sim" if r["nota_estimada"] else "não") if r["nota"] is not None else "", r["gravidade"] or "",
             r["resumo"], r["historico"] or "sem histórico", r["resposta_sugerida"], r["acao_sugerida"], r["status"],
         )])

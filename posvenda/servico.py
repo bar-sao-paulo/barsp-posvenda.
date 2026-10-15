@@ -76,6 +76,7 @@ def gerar_lista(engine: Engine, dia: date, buscar: BuscarSessoes, *, hoje: date 
     with engine.begin() as con:
         existentes = {r.telefone: r for r in con.execute(select(envios).where(envios.c.data_visita == dia))}
         ja_enviados = {t for t, r in existentes.items() if r.enviado_em is not None}
+        _gravar_itens(con, dia, candidatos, ja_enviados)
         ficam = [c for c in ficam if c.telefone not in ja_enviados]
         versoes = lista.sortear_versoes([c.telefone for c in ficam],
                                         {t: r.versao for t, r in existentes.items()}, rng)
@@ -85,7 +86,7 @@ def gerar_lista(engine: Engine, dia: date, buscar: BuscarSessoes, *, hoje: date 
                 con.execute(delete(envios).where(envios.c.id == r.id))
         for c in ficam:
             v = versoes[c.telefone]
-            dados = dict(nome_completo=c.nome_completo, nome=c.nome, origem=c.origem, prato=c.prato, versao=v,
+            dados = dict(nome_completo=c.nome_completo, nome=c.nome, origem=c.origem, prato=c.prato, versao=v, itens=c.itens,
                          mensagem=lista.montar_mensagem(v, c.nome, c.prato, dia, hoje))
             if c.telefone in existentes:
                 con.execute(update(envios).where(envios.c.id == existentes[c.telefone].id).values(**dados))
@@ -98,6 +99,42 @@ def gerar_lista(engine: Engine, dia: date, buscar: BuscarSessoes, *, hoje: date 
         con.execute(delete(buscas).where(buscas.c.data_visita == dia))
         con.execute(insert(buscas).values(data_visita=dia, buscado_em=agora()))
     return obter_lista(engine, dia)
+
+
+def _itens_por_telefone(candidatos: list[lista.Candidato]) -> dict[str, str]:
+    saida: dict[str, str] = {}
+    for c in candidatos:
+        if c.telefone and c.itens and c.telefone not in saida:
+            saida[c.telefone] = c.itens
+    return saida
+
+
+def _gravar_itens(con, dia: date, candidatos: list[lista.Candidato], telefones: set[str]) -> int:
+    """Grava o que cada telefone consumiu no dia (vazio se a comanda não aparecer mais)."""
+    itens = _itens_por_telefone(candidatos)
+    n = 0
+    for t in telefones:
+        n += con.execute(update(envios).where(and_(envios.c.data_visita == dia, envios.c.telefone == t))
+                         .values(itens=itens.get(t, ""))).rowcount
+    return n
+
+
+def preencher_itens(engine: Engine, buscar: BuscarSessoes, hoje: date, *, dias: int = 30) -> date | None:
+    """Envios antigos, de antes de guardarmos os itens: busca de novo um dia por vez no Takeat e preenche.
+    Devolve o dia preenchido (None se não falta nenhum)."""
+    with engine.connect() as con:
+        dia = con.execute(select(envios.c.data_visita).where(and_(
+            envios.c.itens.is_(None), envios.c.data_visita >= hoje - timedelta(days=dias),
+            envios.c.data_visita < hoje)).order_by(envios.c.data_visita.desc())).scalar()
+    if dia is None:
+        return None
+    inicio, fim = lista.janela_utc(dia)
+    candidatos = lista.clientes_do_dia(buscar(inicio, fim), dia)
+    with engine.begin() as con:
+        telefones = {r[0] for r in con.execute(select(envios.c.telefone).where(and_(
+            envios.c.data_visita == dia, envios.c.itens.is_(None))))}
+        _gravar_itens(con, dia, candidatos, telefones)
+    return dia
 
 
 def obter_lista(engine: Engine, dia: date) -> ListaDoDia:
