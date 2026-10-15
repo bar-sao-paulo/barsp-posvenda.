@@ -16,6 +16,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from flask import Flask, Response, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 from jinja2 import DictLoader
+from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import automacao, historico, lista, respostas, servico
@@ -80,6 +81,14 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                       PERMANENT_SESSION_LIFETIME=timedelta(days=30))
     app.jinja_loader = DictLoader(TEMPLATES)
+
+    @app.context_processor
+    def _telefone_na_tela():
+        def ver_telefone(envio_id: int, telefone: str) -> Markup:
+            """Telefone mascarado + botão "Ver telefone": o número completo só vem quando alguém clica."""
+            return Markup('{} <button type="button" class="btn2 mini" onclick="verTelefone(this, {})">Ver telefone'
+                          '</button>').format(lista.mascarar(telefone), int(envio_id))
+        return {"ver_telefone": ver_telefone}
     producao = engine is None
     engine = engine or criar_engine()
     buscar = buscar_sessoes if buscar_sessoes is not None else _buscar_takeat()
@@ -308,6 +317,17 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             flash(str(exc))
         return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
 
+    @app.get("/telefone/<int:envio_id>")
+    def telefone(envio_id: int):
+        """Número completo de um cliente da lista, para ligar (só com login; o painel mostra mascarado)."""
+        tel = servico.telefone_do_envio(engine, envio_id)
+        if not tel:
+            abort(404)
+        log.info("Telefone completo mostrado (envio %s) para %s", envio_id, g.usuario)
+        resp = jsonify(telefone=tel, formatado=lista.formatar_telefone(tel))
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
     @app.get("/midia/<int:mensagem_id>")
     def midia(mensagem_id: int):
         """Toca o áudio (ou mostra a foto) do cliente, buscando na Meta na hora. O arquivo não é guardado."""
@@ -420,6 +440,7 @@ main{max-width:980px;margin:0 auto;padding:16px}
 .resumo{font-weight:600;font-size:16px}.quieto{color:var(--qt);font-size:13px}
 button,.btn{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
 .btn2{background:#fff;color:var(--tx);border:1px solid var(--bd)}
+.mini{padding:2px 8px;font-size:12px;min-height:0;width:auto}
 input,textarea{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;width:100%}
 textarea{min-height:92px;resize:vertical}
 .cli{display:grid;gap:8px}.cli .topo{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
@@ -432,7 +453,18 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 </style></head><body>
 {% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
-<main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main></body></html>""",
+<main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main>
+<script>
+function verTelefone(b, id) {
+  fetch('/telefone/' + id).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    if (!d) { b.textContent = 'não consegui mostrar'; return; }
+    var s = document.createElement('span');
+    s.textContent = d.formatado + ' ';
+    var a = document.createElement('a'); a.href = 'tel:+' + d.telefone; a.textContent = '📞 Ligar';
+    s.appendChild(a); b.replaceWith(s);
+  });
+}
+</script></body></html>""",
 
     "entrar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card" style="max-width:380px;margin:40px auto">
 <h2 style="margin-top:0">Pós-venda · Bar São Paulo</h2><form method="post"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
@@ -458,7 +490,7 @@ Toque em "Abrir no WhatsApp", envie a mensagem e volte para o próximo.</p>
 
 {% for e in dados.envios %}<div class="card cli{{ ' enviado' if e.enviado_em }}" id="e{{ e.id }}">
 <div class="topo"><strong>{{ e.nome_completo or e.nome or 'Sem nome' }}</strong><span class="tag">{{ e.origem }}</span>
-<span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ mascarar(e.telefone) }} · 🛒 {{ e.compras }}</span></div>
+<span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ ver_telefone(e.id, e.telefone) }} · 🛒 {{ e.compras }}</span></div>
 {% if e.itens %}<p class="quieto"><b>Consumiu:</b> {{ e.itens }}</p>{% endif %}
 <textarea id="m{{ e.id }}" aria-label="Mensagem">{{ e.mensagem }}</textarea>
 {% if e.erro %}<p class="erro">Erro no WhatsApp: {{ e.erro }}</p>{% endif %}
@@ -498,7 +530,7 @@ function abrir(id, tel) {
 <p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
 {% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
 <div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}</span><span class="tag">Versão {{ r.versao }}</span>
-<span class="quieto">{{ r.prato or 'seu pedido' }} · {{ mascarar(r.telefone) }} · 🛒 {{ r.historico }}</span></div>
+<span class="quieto">{{ r.prato or 'seu pedido' }} · {{ ver_telefone(r.envio_id, r.telefone) }} · 🛒 {{ r.historico }}</span></div>
 {% if r.itens %}<p class="quieto"><b>Consumiu:</b> {{ r.itens }}</p>{% endif %}
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
 {% for f in r.falas %}{% if f.direcao == 'equipe' %}<div class="fala"><span class="quieto">No áudio (escrito pela equipe):</span> {{ f.texto }}</div>

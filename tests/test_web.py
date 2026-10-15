@@ -137,3 +137,18 @@ def test_nao_enviar(ambiente):
 def test_saude_sem_login(ambiente):
     app, _, _ = ambiente
     assert app.test_client().get("/saude").get_data(as_text=True) == "ok"
+
+
+def test_ver_telefone_so_quando_clica(ambiente):
+    app, engine, _ = ambiente
+    c = app.test_client()
+    _logar(c)
+    html = c.get("/envio").get_data(as_text=True)
+    assert "Ver telefone" in html and "(11) 90000-0023" not in html
+    e = next(x for x in servico.obter_lista(engine, date(2026, 10, 2)).envios
+             if x["telefone"] == "5511900000023")
+    r = c.get(f"/telefone/{e['id']}")
+    assert r.get_json() == {"telefone": "5511900000023", "formatado": "(11) 90000-0023"}
+    assert "no-store" in r.headers["Cache-Control"]
+    assert c.get("/telefone/99999").status_code == 404
+    assert app.test_client().get(f"/telefone/{e['id']}").status_code == 302  # sem login

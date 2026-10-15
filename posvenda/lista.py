@@ -75,6 +75,12 @@ def chave_telefone(telefone: str) -> str:
     return d[:2] + d[-8:] if len(d) in (10, 11) else d
 
 
+def formatar_telefone(telefone: str) -> str:
+    """'5511987654321' -> '(11) 98765-4321' (só para quem clicou em "Ver telefone")."""
+    t = telefone[2:] if telefone.startswith("55") and len(telefone) in (12, 13) else telefone
+    return f"({t[:2]}) {t[2:-4]}-{t[-4:]}" if len(t) >= 10 else telefone
+
+
 def mascarar(telefone: str) -> str:
     """Telefone para a tela: só os 4 últimos dígitos (o completo fica na planilha interna)."""
     t = telefone[2:] if telefone.startswith("55") else telefone
