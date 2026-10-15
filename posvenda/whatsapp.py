@@ -81,6 +81,23 @@ class WhatsApp:
         return self._pedir("GET", "", params={"fields": "display_phone_number,verified_name,name_status,status,"
                                                         "code_verification_status,quality_rating"})
 
+    def baixar_midia(self, midia_id: str) -> tuple[bytes, str]:
+        """Áudio/foto que o cliente mandou: pega o endereço temporário na Meta (GET /{media-id}) e baixa o arquivo
+        com o mesmo token. Devolve (conteúdo, tipo). Nada é gravado."""
+        if not midia_id.isdigit():
+            raise WhatsAppErro("Mídia inválida.")
+        info = self._pedir("GET", "", url=f"{self._raiz}/{midia_id}")
+        url = info.get("url") or ""
+        if not url.startswith("https://"):
+            raise WhatsAppErro("A Meta não devolveu o arquivo (pode ter expirado).")
+        try:
+            resp = self._http.get(url, timeout=TIMEOUT, headers={"Authorization": f"Bearer {self._token}"})
+        except requests.RequestException as exc:
+            raise WhatsAppErro(f"Falha de rede ao baixar a mídia: {type(exc).__name__}") from exc
+        if resp.status_code >= 400:
+            raise WhatsAppErro(f"A Meta recusou o download da mídia (HTTP {resp.status_code}).")
+        return resp.content, str(info.get("mime_type") or resp.headers.get("Content-Type") or "application/octet-stream")
+
     def registrar_numero(self, pin: str) -> None:
         """Registra o número na Cloud API com o PIN de 6 dígitos (verificação em duas etapas). O PIN não é guardado."""
         if not (len(pin) == 6 and pin.isdigit()):
@@ -128,6 +145,8 @@ class Recebida:
     texto: str
     wa_id: str
     quando: datetime
+    midia_id: str = ""  # áudio ou foto: id da mídia na Meta, para ouvir/ver no painel
+    midia_tipo: str = ""
 
 
 @dataclass
@@ -141,6 +160,9 @@ _TIPOS_SEM_TEXTO = {
     "image": "[foto]", "audio": "[áudio]", "video": "[vídeo]", "sticker": "[figurinha]",
     "document": "[documento]", "location": "[localização]", "contacts": "[contato]",
 }
+
+
+_TIPOS_COM_MIDIA = {"audio", "image"}
 
 
 def _texto(m: dict[str, Any]) -> str:
@@ -169,7 +191,10 @@ def ler_webhook(payload: dict[str, Any]) -> tuple[list[Recebida], list[Situacao]
                     quando = datetime.fromtimestamp(int(m.get("timestamp", "0")), tz=timezone.utc)
                 except (TypeError, ValueError):
                     quando = datetime.now(timezone.utc)
-                recebidas.append(Recebida(str(m.get("from", "")), _texto(m).strip(), str(m.get("id", "")), quando))
+                tipo = m.get("type") or ""
+                midia = (m.get(tipo) or {}) if tipo in _TIPOS_COM_MIDIA and isinstance(m.get(tipo), dict) else {}
+                recebidas.append(Recebida(str(m.get("from", "")), _texto(m).strip(), str(m.get("id", "")), quando,
+                                          str(midia.get("id") or ""), tipo if midia.get("id") else ""))
             for s in valor.get("statuses") or []:
                 erros = s.get("errors") or []
                 detalhe = ""

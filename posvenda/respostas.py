@@ -145,13 +145,15 @@ class Resultado:
 
 def registrar_recebida(engine: Engine, telefone: str, texto: str, wa_id: str, quando: datetime,
                        enviar_texto: Callable[[str, str], str] | None = None,
-                       bloquear: Callable[[str], Any] | None = None) -> Resultado:
+                       bloquear: Callable[[str], Any] | None = None, midia_id: str = "",
+                       midia_tipo: str = "") -> Resultado:
     envio = envio_do_telefone(engine, telefone, quando)
     envio_id = envio["id"] if envio else None
     try:
         with engine.begin() as con:
             con.execute(insert(mensagens).values(telefone=telefone, envio_id=envio_id, direcao="entrada",
-                                                 texto=texto, wa_id=wa_id or None, criado_em=quando))
+                                                 texto=texto, wa_id=wa_id or None, criado_em=quando,
+                                                 midia_id=midia_id or None, midia_tipo=midia_tipo or None))
     except IntegrityError:
         return Resultado("duplicada", envio_id)  # o WhatsApp pode reenviar o mesmo evento
 
@@ -211,19 +213,63 @@ def historico_cliente(engine: Engine, envio: dict[str, Any]) -> tuple[str, int]:
     return historico.compras(engine, [(envio["telefone"], envio["data_visita"])])[0]
 
 
-def textos_do_cliente(engine: Engine, envio_id: int) -> list[str]:
+PREFIXO_AUDIO = "O cliente disse no áudio (escrito pela equipe): "
+
+
+def falas_do_cliente(engine: Engine, envio_id: int) -> list[dict[str, Any]]:
+    """Mensagens do cliente e o que a equipe escreveu ao ouvir um áudio, em ordem."""
     with engine.connect() as con:
-        return [r.texto for r in con.execute(select(mensagens.c.texto).where(and_(
-            mensagens.c.envio_id == envio_id, mensagens.c.direcao == "entrada")).order_by(mensagens.c.criado_em))]
+        return [dict(r._mapping) for r in con.execute(
+            select(mensagens.c.id, mensagens.c.texto, mensagens.c.direcao, mensagens.c.midia_id, mensagens.c.midia_tipo)
+            .where(and_(mensagens.c.envio_id == envio_id, mensagens.c.direcao.in_(("entrada", "equipe"))))
+            .order_by(mensagens.c.criado_em, mensagens.c.id))]
+
+
+def midia_da_mensagem(engine: Engine, mensagem_id: int) -> str | None:
+    with engine.connect() as con:
+        return con.execute(select(mensagens.c.midia_id).where(and_(
+            mensagens.c.id == mensagem_id, mensagens.c.direcao == "entrada"))).scalar()
+
+
+def textos_do_cliente(engine: Engine, envio_id: int) -> list[str]:
+    return [(PREFIXO_AUDIO if f["direcao"] == "equipe" else "") + f["texto"] for f in falas_do_cliente(engine, envio_id)]
+
+
+def audio_sem_texto(falas: list[dict[str, Any]]) -> bool:
+    """Áudio que ninguém ouviu ainda: a IA não entende áudio, então a nota não pode sair sozinha."""
+    audios = sum(1 for f in falas if f["direcao"] == "entrada" and (f.get("midia_tipo") == "audio"
+                                                                    or f["texto"].startswith("[áudio]")))
+    escritos = sum(1 for f in falas if f["direcao"] == "equipe")
+    return audios > escritos
+
+
+def escrever_audio(engine: Engine, resposta_id: int, texto: str, agora: datetime | None = None) -> None:
+    """Grava o que o cliente disse no áudio (ouvido pela equipe) e manda a resposta para nova análise.
+    Não mexe no prazo de 24 h, que conta da última mensagem do próprio cliente."""
+    texto = " ".join((texto or "").split())
+    if not texto:
+        raise RespostaErro("Escreva o que o cliente disse no áudio.")
+    with engine.begin() as con:
+        r = con.execute(select(respostas.c.envio_id, respostas.c.status, envios.c.telefone)
+                        .join(envios, envios.c.id == respostas.c.envio_id).where(respostas.c.id == resposta_id)).first()
+        if r is None:
+            raise RespostaErro("Resposta não encontrada.")
+        con.execute(insert(mensagens).values(telefone=r.telefone, envio_id=r.envio_id, direcao="equipe",
+                                             texto=texto[:2000], criado_em=agora or agora_utc()))
+        if r.status in (REVISAR, PODE_ENVIAR):
+            con.execute(update(respostas).where(respostas.c.id == resposta_id).values(status=AGUARDANDO))
 
 
 def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict[str, Any]:
     with engine.connect() as con:
         r = con.execute(select(respostas).where(respostas.c.id == resposta_id)).first()
         envio = dict(con.execute(select(envios).where(envios.c.id == r.envio_id)).first()._mapping)
+    falas = falas_do_cliente(engine, envio["id"])
     textos = textos_do_cliente(engine, envio["id"])
     historico, _ = historico_cliente(engine, envio)
     motivos: list[str] = []
+    if audio_sem_texto(falas):
+        motivos.append("cliente mandou áudio: ouça e escreva o que ele disse")
     if r.respondida_em is not None:
         motivos.append("cliente escreveu de novo depois da nossa resposta")
     try:
@@ -394,7 +440,9 @@ def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> lis
                                                     hoje)):
         r["historico"], r["visitas"] = txt, n
     for r in rows:
-        r["textos"] = textos_do_cliente(engine, r["envio_id"])
+        r["falas"] = falas_do_cliente(engine, r["envio_id"])
+        r["textos"] = [f["texto"] for f in r["falas"]]
+        r["audio_pendente"] = audio_sem_texto(r["falas"])
     rows.sort(key=lambda r: (r["nota"] if r["nota"] is not None else -1, bool(r["nota_estimada"]), -r["visitas"]))
     return rows
 

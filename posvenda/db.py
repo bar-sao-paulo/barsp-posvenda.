@@ -68,10 +68,13 @@ mensagens = Table(
     Column("id", Integer, primary_key=True),
     Column("telefone", String(20), nullable=False, index=True),
     Column("envio_id", Integer, ForeignKey("envios.id", ondelete="SET NULL"), index=True),
-    Column("direcao", String(10), nullable=False),  # "entrada" ou "saida"
+    Column("direcao", String(10), nullable=False),  # "entrada", "saida" ou "equipe" (o que o cliente disse no áudio)
     Column("texto", Text, nullable=False, default=""),
     Column("wa_id", String(100), unique=True),
     Column("criado_em", DateTime(timezone=True), nullable=False),
+    # Áudio ou foto do cliente: id da mídia na Meta (o arquivo não é guardado; é buscado na hora de ouvir).
+    Column("midia_id", String(100)),
+    Column("midia_tipo", String(20)),
 )
 
 # Uma linha por cliente que respondeu a pesquisa: análise da IA e o que a equipe fez.
@@ -120,6 +123,7 @@ rotinas = Table(
 # Colunas criadas depois que a tabela já existia no Railway (migração simples por ALTER TABLE).
 _COLUNAS_NOVAS = {
     "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)", "itens": "TEXT"},
+    "mensagens": {"midia_id": "VARCHAR(100)", "midia_tipo": "VARCHAR(20)"},
 }
 
 
