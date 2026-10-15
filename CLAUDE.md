@@ -21,7 +21,9 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - 🔴 nunca sai sozinha ("Revisar antes de enviar"). Resposta ligada só pelo telefone (DDD + 8 últimos dígitos);
   número que não está na lista fica em "Fora da lista". "PARAR" bloqueia o telefone.
 - Áudio: o Claude não ouve. O id da mídia fica em `mensagens.midia_id` (o arquivo não é guardado; o painel busca na Meta
-  ao tocar); áudio sem o texto escrito pela equipe (`direcao="equipe"`) vai para "Revisar antes de enviar".
+  ao tocar); áudio sem texto (`direcao="equipe"` escrito pela equipe ou `"transcrito"`) vai para "Revisar antes de enviar".
+  Com `OPENAI_API_KEY`, o agendador transcreve cada áudio uma vez (`transcricao.py`, trava `transcrever:<id>`); o áudio
+  vai para a OpenAI só para virar texto (decidido pelo Emerson em 15/10/2026).
 - O Claude sugere nota/resumo/resposta/ação (`ia.py`); as travas (gravidade, revisão, vocabulário proibido,
   compensação, emojis, janela de 24 h) ficam no código (`respostas.py`), não no modelo.
 
@@ -36,6 +38,7 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `ia.py` | Análise da resposta com o Claude (`claude-opus-5-5`, saída em JSON) |
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
 | `historico.py` | Compras do cliente nos últimos 12 meses (dias com comanda, tabela `visitas`), lidas do Takeat em blocos de 3 dias (`historico_blocos`) pelo agendador |
+| `transcricao.py` | Transcrição dos áudios (OpenAI `audio/transcriptions`, liga com `OPENAI_API_KEY`; modelo em `TRANSCRICAO_MODELO`) |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
 | `api_resumo.py` | `GET /api/resumo` (só leitura, `Authorization: Bearer PAINEL_API_TOKEN`): números do pós-venda por mês (enviadas, respostas, nota média, gravidades), sem nenhum dado de cliente, para o painel financeiro |
 | `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
