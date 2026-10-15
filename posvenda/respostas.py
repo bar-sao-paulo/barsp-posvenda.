@@ -363,6 +363,23 @@ def reavaliar_estimadas(engine: Engine) -> int:
             respostas.c.status.in_([PODE_ENVIAR, REVISAR]))).values(status=AGUARDANDO)).rowcount
 
 
+def revisar_audios_antigos(engine: Engine) -> int:
+    """Respostas analisadas antes da trava do áudio (15/10/2026) que estão "Pode enviar" com áudio sem texto:
+    passam para "Revisar antes de enviar". Rodada uma única vez pelo agendador (trava em `rotinas`)."""
+    with engine.connect() as con:
+        rows = con.execute(select(respostas.c.id, respostas.c.envio_id, respostas.c.motivo_revisao)
+                           .where(respostas.c.status == PODE_ENVIAR)).all()
+    n = 0
+    for r in rows:
+        if not audio_sem_texto(falas_do_cliente(engine, r.envio_id)):
+            continue
+        motivo = ", ".join(x for x in ("cliente mandou áudio: ouça e escreva o que ele disse", r.motivo_revisao) if x)
+        with engine.begin() as con:
+            n += con.execute(update(respostas).where(and_(respostas.c.id == r.id, respostas.c.status == PODE_ENVIAR))
+                             .values(status=REVISAR, motivo_revisao=motivo[:300])).rowcount
+    return n
+
+
 ENVIANDO = "Enviando"
 
 
