@@ -7,7 +7,8 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - **Nunca** pedir, colar, imprimir ou gravar chaves, tokens, senhas ou códigos OAuth. Credenciais só nas variáveis do Railway.
 - No código e nos testes, só **nomes** de variáveis, nomes e telefones fictícios.
 - Telefone completo só no link do WhatsApp, no CSV interno e no botão "Ver telefone" (busca `/telefone/<id>` ao clicar,
-  decidido pelo Emerson em 15/10/2026); na tela use `lista.mascarar`.
+  decidido pelo Emerson em 15/10/2026) e na tela Não enviar, com o nome (Emerson, 17/10/2026); no resto da tela use
+  `lista.mascarar`.
 - Nunca guardar respostas ou dados de clientes fora do banco do pós-venda.
 - Antes de mudar algo grande, **confirmar o plano com o Emerson**.
 - Decisões que dependem da API da Takeat: citar a página `.md` da documentação
