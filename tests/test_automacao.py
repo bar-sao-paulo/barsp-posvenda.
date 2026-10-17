@@ -515,3 +515,26 @@ def test_reavaliacao_unica_das_notas_8(engine):
     assert _resposta(engine).nota == 9 and len(claude.chamadas) == 1
     automacao.rodar_uma_vez(engine, automacao.Config(), classificar=claude, agora=AGORA)  # só uma vez
     assert len(claude.chamadas) == 1
+
+
+def test_resposta_nao_fala_quantas_vezes_o_cliente_veio(engine):
+    assert "fala quantas vezes o cliente veio" in respostas.problemas_na_resposta(
+        "Oi, Isabelle! Já é a sua terceira visita e ficamos muito felizes!")
+    assert respostas.problemas_na_resposta("Oi! Obrigada mais uma vez. Esperamos te ver de novo em breve!") == []
+    _enviar_tudo(engine)
+    _receber(engine, "Tudo excelente")
+    respostas.analisar(engine, _resposta(engine).id, ClaudeFalso(analise(
+        resposta="Oi, João! Que bom te ver pela 3ª vez. Volte sempre!")))
+    r = _resposta(engine)
+    assert r.status == respostas.REVISAR and "quantas vezes" in r.motivo_revisao
+
+
+def test_sugestoes_antigas_citando_visitas_vao_para_revisao(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "Tudo excelente")
+    from sqlalchemy import update
+    with engine.begin() as con:
+        con.execute(update(t_respostas).values(status=respostas.PODE_ENVIAR, motivo_revisao="",
+                                               resposta_sugerida="Oi! Já é a sua terceira visita!"))
+    automacao.rodar_uma_vez(engine, automacao.Config(), agora=AGORA)
+    assert _resposta(engine).status == respostas.REVISAR

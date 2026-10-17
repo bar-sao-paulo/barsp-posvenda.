@@ -18,6 +18,8 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - Fora da lista: iFood, sem celular, "não enviar", recebeu nos últimos 7 dias, telefone repetido.
 - Versões equilibradas (nenhuma passa de metade da lista com 3+ clientes).
 - Nunca prometer desconto, cortesia ou reembolso ao cliente; no máximo 2 emojis por mensagem.
+- Nunca dizer ao cliente quantas vezes ele veio ou comprou ("terceira visita", "cliente fiel"): o número costuma estar
+  errado (Emerson, 17/10/2026). O histórico vai só para a ação da equipe; a trava `_VISITAS` manda para revisão.
 - Respostas: 🔴 0–5, 🟡 6–8, 🟢 9–10; elogio curto sem crítica ("ótimo", "tudo certo", 👍, ❤️) ou sugestão sem crítica = 9 estimada; neutra/ambígua ("ok", "oi", resposta automática) = 8 estimada; ressalva vai para Resumo e Ação.
 - 🔴 nunca sai sozinha ("Revisar antes de enviar"). Resposta ligada só pelo telefone (DDD + 8 últimos dígitos);
   número que não está na lista fica em "Fora da lista". "PARAR" bloqueia o telefone.
