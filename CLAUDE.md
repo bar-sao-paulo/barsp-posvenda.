@@ -44,7 +44,7 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `transcricao.py` | Transcrição dos áudios (OpenAI `audio/transcriptions`, liga com `OPENAI_API_KEY`; modelo em `TRANSCRICAO_MODELO`) |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
 | `api_resumo.py` | `GET /api/resumo` (só leitura, `Authorization: Bearer PAINEL_API_TOKEN`): números do pós-venda por mês (enviadas, respostas, nota média, gravidades), sem nenhum dado de cliente, para o painel financeiro |
-| `web.py` | Painel Flask: login, Envio, Respostas, Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
+| `web.py` | Painel Flask: login, Envio, Respostas (por dia ou mês, com o NPS do mês: % de 9–10 − % de 0–6, notas estimadas entram), Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
 
 ## Convenções
 - Datas/horas: fuso `America/Sao_Paulo` (`lista.TZ`); no banco em UTC.
