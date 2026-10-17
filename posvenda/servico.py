@@ -183,8 +183,16 @@ def desbloquear(engine: Engine, telefone: str) -> None:
 
 
 def listar_bloqueios(engine: Engine) -> list[dict[str, Any]]:
+    """Telefones que não recebem a pesquisa, com o nome da última lista em que o cliente apareceu (se apareceu)."""
     with engine.connect() as con:
-        return [dict(r._mapping) for r in con.execute(select(bloqueios).order_by(bloqueios.c.criado_em.desc()))]
+        rows = [dict(r._mapping) for r in con.execute(select(bloqueios).order_by(bloqueios.c.criado_em.desc()))]
+        for r in rows:
+            chave = lista.chave_telefone(r["telefone"])
+            nomes = con.execute(select(envios.c.telefone, envios.c.nome_completo, envios.c.nome)
+                                .where(envios.c.telefone.like(f"%{chave[-8:]}"))
+                                .order_by(envios.c.data_visita.desc())).all()
+            r["nome"] = next((nc or n for t, nc, n in nomes if lista.chave_telefone(t) == chave and (nc or n)), "")
+    return rows
 
 
 def _sem_ponto_e_virgula(texto: Any) -> str:

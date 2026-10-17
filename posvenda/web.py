@@ -279,7 +279,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
                 flash("Telefone incluído: não recebe mais a pesquisa." if tel else
                       "Telefone inválido. Use DDD + número, ex.: (11) 98765-4321.")
             return redirect(url_for("nao_enviar"))
-        return render_template("nao_enviar.html", bloqueios=servico.listar_bloqueios(engine), mascarar=lista.mascarar)
+        return render_template("nao_enviar.html", bloqueios=servico.listar_bloqueios(engine),
+                               formatar=lista.formatar_telefone)
 
     # ----------------------------------------------------------------------- webhook do WhatsApp (Meta)
     @app.get("/webhook/whatsapp")
@@ -665,8 +666,8 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <form method="post" class="cli"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input name="telefone" placeholder="Telefone com DDD, ex.: (11) 98765-4321" required>
 <input name="motivo" placeholder="Motivo (opcional)"><div><button>Incluir</button></div></form></div>
-{% if bloqueios %}<div class="card"><table><tr><th>Telefone</th><th>Motivo</th><th>Desde</th><th></th></tr>
-{% for b in bloqueios %}<tr><td>{{ mascarar(b.telefone) }}</td><td>{{ b.motivo or '—' }}</td><td>{{ b.criado_em.strftime('%d/%m/%Y') }}</td>
+{% if bloqueios %}<div class="card"><table><tr><th>Nome</th><th>Telefone</th><th>Motivo</th><th>Desde</th><th></th></tr>
+{% for b in bloqueios %}<tr><td>{{ b.nome or '—' }}</td><td>{{ formatar(b.telefone) }}</td><td>{{ b.motivo or '—' }}</td><td>{{ b.criado_em.strftime('%d/%m/%Y') }}</td>
 <td><form method="post"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="remover" value="{{ b.telefone }}">
 <button class="btn2" onclick="return confirm('Voltar a enviar a pesquisa para este telefone?')">Remover</button></form></td></tr>{% endfor %}</table></div>{% endif %}
 {% endblock %}""",

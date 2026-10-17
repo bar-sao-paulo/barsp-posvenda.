@@ -152,3 +152,14 @@ def test_ver_telefone_so_quando_clica(ambiente):
     assert "no-store" in r.headers["Cache-Control"]
     assert c.get("/telefone/99999").status_code == 404
     assert app.test_client().get(f"/telefone/{e['id']}").status_code == 302  # sem login
+
+
+def test_nao_enviar_mostra_nome_e_telefone_completo(ambiente):
+    app, engine, _ = ambiente
+    servico.gerar_lista(engine, date(2026, 10, 2), lambda a, b: sessoes_de_02_10(), hoje=HOJE)
+    servico.bloquear(engine, "5511900000025", "pediu")
+    servico.bloquear(engine, "(11) 90000-0099", "")
+    c = app.test_client()
+    _logar(c)
+    html = c.get("/nao-enviar").get_data(as_text=True)
+    assert "Camila" in html and "(11) 90000-0025" in html and "(11) 90000-0099" in html
