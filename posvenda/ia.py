@@ -50,7 +50,9 @@ diga que levou ao gerente e que vai retornar.
 - Nunca culpe ninguém: entregador, iFood, cozinha, garçom ou o próprio cliente.
 - Proibido: "prezado cliente", "lamentamos o transtorno", "infelizmente", "conforme", "informamos que", \
 linguagem de robô ou de call center. No máximo 2 emojis.
-- Use o histórico do cliente (visitas, pratos, ticket) quando houver, para personalizar.
+- Nunca diga quantas vezes o cliente veio ou comprou, nem que é a primeira vez, a terceira visita, cliente fiel ou \
+frequente: esse número costuma estar errado. O histórico serve só para a ação sugerida da equipe. Para personalizar, \
+use o que o cliente escreveu e o que ele consumiu.
 
 Ação sugerida (para a equipe, objetiva): o que fazer e quem decide. Compensação só aparece aqui, como proposta para o \
 gerente aprovar. Sem histórico, sugira uma ação genérica."""
@@ -95,7 +97,7 @@ def montar_contexto(cliente: dict[str, Any], textos: list[str], historico: str) 
         f"Prato/pedido: {cliente.get('prato') or 'seu pedido'}",
         f"Tudo o que consumiu: {cliente.get('itens') or 'não informado'}",
         f"Versão da pesquisa: {cliente.get('versao')}",
-        f"Histórico: {historico}",
+        f"Histórico (só para a ação da equipe, nunca citar na resposta): {historico}",
         "</cliente>",
         "<mensagens>",
         *[f"- {t}" for t in textos],

@@ -107,6 +107,17 @@ def eh_pedido_para_parar(texto: str) -> bool:
     return limpo in PALAVRAS_PARAR
 
 
+# Número de visitas/compras na resposta ao cliente (decidido pelo Emerson em 17/10/2026: o número costuma estar
+# errado). Comparado sem acento e em minúsculas.
+_ORDINAIS = r"(primeira|segunda|terceira|quarta|quinta|sexta|setima|oitava|nona|decima|\d+\s*[aºª]?)"
+_CONTAGEM = r"(\d+|duas|dois|tres|quatro|cinco|seis|sete|oito|nove|dez|varias|muitas)"
+_VISITAS = re.compile(
+    rf"\b{_ORDINAIS}\s+(visita|vez|compra|pedido)\b"
+    rf"|\b{_CONTAGEM}\s+(visitas|vezes|compras|pedidos)\b"
+    r"|\bcliente\s+(fiel|frequente|assiduo|de casa)\b|\bja\s+e\s+de\s+casa\b|\bsempre\s+vem\b"
+)
+
+
 def problemas_na_resposta(texto: str) -> list[str]:
     """Motivos para a resposta sugerida não sair sozinha."""
     motivos = []
@@ -119,6 +130,8 @@ def problemas_na_resposta(texto: str) -> list[str]:
         motivos.append("fala em compensação")
     if len(_EMOJI.findall(texto or "")) > 2:
         motivos.append("mais de 2 emojis")
+    if _VISITAS.search(baixo):
+        motivos.append("fala quantas vezes o cliente veio")
     return motivos
 
 
@@ -374,6 +387,23 @@ def revisar_audios_antigos(engine: Engine) -> int:
         if not audio_sem_texto(falas_do_cliente(engine, r.envio_id)):
             continue
         motivo = ", ".join(x for x in ("cliente mandou áudio: ouça e escreva o que ele disse", r.motivo_revisao) if x)
+        with engine.begin() as con:
+            n += con.execute(update(respostas).where(and_(respostas.c.id == r.id, respostas.c.status == PODE_ENVIAR))
+                             .values(status=REVISAR, motivo_revisao=motivo[:300])).rowcount
+    return n
+
+
+def revisar_respostas_com_visitas(engine: Engine) -> int:
+    """Sugestões prontas ("Pode enviar") feitas antes da regra de 17/10/2026 que citam quantas vezes o cliente veio:
+    vão para "Revisar antes de enviar". Rodada uma única vez pelo agendador (trava em `rotinas`)."""
+    with engine.connect() as con:
+        rows = con.execute(select(respostas.c.id, respostas.c.resposta_sugerida, respostas.c.motivo_revisao)
+                           .where(respostas.c.status == PODE_ENVIAR)).all()
+    n = 0
+    for r in rows:
+        if not _VISITAS.search(lista.sem_acento(r.resposta_sugerida or "")):
+            continue
+        motivo = ", ".join(x for x in ("fala quantas vezes o cliente veio", r.motivo_revisao) if x)
         with engine.begin() as con:
             n += con.execute(update(respostas).where(and_(respostas.c.id == r.id, respostas.c.status == PODE_ENVIAR))
                              .values(status=REVISAR, motivo_revisao=motivo[:300])).rowcount
