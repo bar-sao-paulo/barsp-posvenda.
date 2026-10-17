@@ -425,12 +425,12 @@ def positivas_para_enviar(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def enviar_positivas(engine: Engine, dia: date, enviar_texto: Callable[[str, str], str],
-                     agora: datetime | None = None) -> ResultadoLote:
+                     agora: datetime | None = None, ate: date | None = None) -> ResultadoLote:
     """Manda de uma vez a resposta sugerida para todas as 🟢 do dia que podem sair (botão "Enviar todas as 🟢").
     Cada resposta é "reservada" antes do envio, para um segundo clique não mandar a mesma mensagem duas vezes."""
     agora = agora or agora_utc()
     res = ResultadoLote(erros=[])
-    for r in positivas_para_enviar(listar(engine, dia, dia)):
+    for r in positivas_para_enviar(listar(engine, dia, ate or dia)):
         with engine.begin() as con:
             reservou = con.execute(update(respostas).where(and_(
                 respostas.c.id == r["id"], respostas.c.status == PODE_ENVIAR)).values(status=ENVIANDO)).rowcount
@@ -522,6 +522,42 @@ def contagem(rows: list[dict[str, Any]]) -> str:
         if r["gravidade"] in c:
             c[r["gravidade"]] += 1
     return f"🔴 {c[CRITICO]} críticos | 🟡 {c[ATENCAO]} atenção | 🟢 {c[POSITIVO]} positivos"
+
+
+MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro",
+         "novembro", "dezembro"]
+
+
+def nome_do_mes(ano: int, mes: int) -> str:
+    return f"{MESES[mes - 1]}/{ano}"
+
+
+def meses_com_respostas(engine: Engine) -> list[tuple[int, int]]:
+    """Meses (pelo dia da visita) que têm alguma resposta, do mais recente para o mais antigo."""
+    with engine.connect() as con:
+        dias = con.execute(select(envios.c.data_visita).distinct()
+                           .select_from(respostas.join(envios, respostas.c.envio_id == envios.c.id))).scalars()
+        return sorted({(d.year, d.month) for d in dias}, reverse=True)
+
+
+def nps(engine: Engine, de: date, ate: date) -> dict[str, Any] | None:
+    """NPS das notas das visitas entre `de` e `ate`: % de promotores (9–10) − % de detratores (0–6).
+    Notas estimadas pela IA entram na conta; quantas são estimadas vai junto. None se não há nota."""
+    with engine.connect() as con:
+        notas = con.execute(select(respostas.c.nota, respostas.c.nota_estimada)
+                            .select_from(respostas.join(envios, respostas.c.envio_id == envios.c.id))
+                            .where(and_(envios.c.data_visita >= de, envios.c.data_visita <= ate,
+                                        respostas.c.nota.is_not(None)))).all()
+    if not notas:
+        return None
+    total = len(notas)
+    promotores = sum(1 for n, _ in notas if n >= 9)
+    detratores = sum(1 for n, _ in notas if n <= 6)
+    valor = round(100 * (promotores - detratores) / total)
+    faixa = ("Excelência" if valor >= 75 else "Qualidade" if valor >= 50 else
+             "Aperfeiçoamento" if valor >= 0 else "Crítica")
+    return dict(valor=valor, faixa=faixa, total=total, promotores=promotores, detratores=detratores,
+                neutros=total - promotores - detratores, estimadas=sum(1 for _, e in notas if e))
 
 
 def _campo(v: Any) -> str:

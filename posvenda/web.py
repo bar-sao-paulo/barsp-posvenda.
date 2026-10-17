@@ -137,6 +137,34 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
                 flash("Data inválida; mostrando ontem.")
         return hoje() - timedelta(days=1)
 
+    def _mes_da_url() -> tuple[int, int] | None:
+        texto = request.values.get("mes", "")
+        try:
+            ano, mes = (int(x) for x in texto.split("-"))
+            date(ano, mes, 1)
+            return ano, mes
+        except ValueError:
+            if texto:
+                flash("Mês inválido; mostrando o dia.")
+            return None
+
+    def _periodo_da_url() -> tuple[date, date, date, tuple[int, int] | None]:
+        """(de, até, dia, mês): com ?mes=AAAA-MM o mês inteiro (até ontem); senão o dia de ?data=."""
+        mes = _mes_da_url()
+        if mes is None:
+            dia = _dia_da_url()
+            return dia, dia, dia, None
+        de = date(*mes, 1)
+        fim = (de + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        ate = max(de, min(fim, hoje() - timedelta(days=1)))
+        return de, ate, de, mes
+
+    def _volta() -> dict:
+        """Volta para o mesmo dia ou mês depois de um botão da tela Respostas."""
+        if request.form.get("mes"):
+            return dict(mes=request.form["mes"])
+        return dict(data=request.form.get("data", ""))
+
     from .api_resumo import registrar as registrar_api_resumo
     registrar_api_resumo(app, engine=engine, hoje=hoje)
 
@@ -284,14 +312,25 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     # ----------------------------------------------------------------------- respostas (planilha do dia)
     @app.get("/respostas")
     def respostas_pagina():
-        dia = _dia_da_url()
-        rows = respostas.listar(engine, dia, dia, hoje())
-        inicio = datetime.combine(dia + timedelta(days=1), time(), lista.TZ)
-        fora = respostas.fora_da_lista(engine, inicio, inicio + timedelta(days=2))
+        de, ate, dia, mes = _periodo_da_url()
+        rows = respostas.listar(engine, de, ate, hoje())
+        fora = []
+        if mes is None:
+            inicio = datetime.combine(dia + timedelta(days=1), time(), lista.TZ)
+            fora = respostas.fora_da_lista(engine, inicio, inicio + timedelta(days=2))
         for m in fora:
             q = m["criado_em"]
             m["quando"] = (q if q.tzinfo else q.replace(tzinfo=timezone.utc)).astimezone(lista.TZ).strftime("%d/%m %H:%M")
+        mes_nps = mes or (dia.year, dia.month)
+        inicio_mes = date(*mes_nps, 1)
+        fim_mes = (inicio_mes + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        meses = respostas.meses_com_respostas(engine)
+        if mes and mes not in meses:
+            meses = sorted({*meses, mes}, reverse=True)
         return render_template("respostas.html", rows=rows, dia=dia, hoje=hoje(), timedelta=timedelta,
+                               mes=f"{mes[0]}-{mes[1]:02d}" if mes else "", meses=meses,
+                               nome_do_mes=respostas.nome_do_mes, mes_nps=respostas.nome_do_mes(*mes_nps),
+                               nps=respostas.nps(engine, inicio_mes, fim_mes),
                                contagem=respostas.contagem(rows), fora=fora,
                                positivas=len(respostas.positivas_para_enviar(rows)), mascarar=lista.mascarar,
                                wa_ok=wa is not None, ia_ok=classificador is not None, R=respostas, tz=lista.TZ)
@@ -306,7 +345,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
                 flash("Resposta enviada.")
             except (respostas.RespostaErro, WhatsAppErro) as exc:
                 flash(str(exc))
-        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+        return redirect(url_for("respostas_pagina", **_volta()) + f"#r{resposta_id}")
 
     @app.post("/respostas/<int:resposta_id>/audio")
     def respostas_audio(resposta_id: int):
@@ -315,7 +354,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             flash("Anotado. A IA refaz a nota e a resposta em instantes (recarregue a página).")
         except respostas.RespostaErro as exc:
             flash(str(exc))
-        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+        return redirect(url_for("respostas_pagina", **_volta()) + f"#r{resposta_id}")
 
     @app.get("/telefone/<int:envio_id>")
     def telefone(envio_id: int):
@@ -347,19 +386,19 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     @app.post("/respostas/<int:resposta_id>/ignorar")
     def respostas_ignorar(resposta_id: int):
         respostas.ignorar(engine, resposta_id)
-        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")) + f"#r{resposta_id}")
+        return redirect(url_for("respostas_pagina", **_volta()) + f"#r{resposta_id}")
 
     @app.post("/respostas/enviar-positivas")
     def respostas_enviar_positivas():
-        dia = _dia_da_url()
+        de, ate, _, _ = _periodo_da_url()
         if wa is None:
             flash("WhatsApp não configurado no Railway.")
         else:
-            res = respostas.enviar_positivas(engine, dia, wa.enviar_texto)
+            res = respostas.enviar_positivas(engine, de, wa.enviar_texto, ate=ate)
             flash(f"{res.enviadas} resposta(s) 🟢 enviada(s)."
                   + (f" {len(res.erros)} não saíram e voltaram para revisão. Primeiro erro: {res.erros[0]}"
                      if res.erros else ""))
-        return redirect(url_for("respostas_pagina", data=dia.isoformat()))
+        return redirect(url_for("respostas_pagina", **_volta()))
 
     @app.post("/respostas/analisar")
     def respostas_analisar():
@@ -368,14 +407,15 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         else:
             n = respostas.processar_pendentes(engine, classificador, espera=timedelta(0))
             flash(f"{n} resposta(s) analisada(s)." if n else "Nenhuma resposta aguardando análise.")
-        return redirect(url_for("respostas_pagina", data=request.form.get("data", "")))
+        return redirect(url_for("respostas_pagina", **_volta()))
 
     @app.get("/respostas/planilha.csv")
     def respostas_csv():
-        dia = _dia_da_url()
-        corpo = respostas.planilha_csv(respostas.listar(engine, dia, dia))
+        de, ate, dia, mes = _periodo_da_url()
+        corpo = respostas.planilha_csv(respostas.listar(engine, de, ate))
+        nome = f"{mes[0]}-{mes[1]:02d}" if mes else dia.isoformat()
         return Response(corpo, mimetype="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f"attachment; filename=pos-venda-{dia.isoformat()}.csv"})
+                        headers={"Content-Disposition": f"attachment; filename=pos-venda-{nome}.csv"})
 
     # ----------------------------------------------------------------------- número do WhatsApp (registro)
     @app.route("/whatsapp", methods=["GET", "POST"])
@@ -450,6 +490,10 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;
 .linha{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .erro{color:var(--al)}.critico{border-left:5px solid var(--al)}.atencao{border-left:5px solid #d9a400}.positivo{border-left:5px solid var(--ac)}
 .fala{background:#f1efe9;border-radius:8px;padding:8px 10px;white-space:pre-wrap}
+select{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fff}
+.topo-resp{display:flex;gap:14px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start}
+.filtros{display:grid;gap:8px}.nps{border:1px solid var(--bd);border-radius:10px;padding:10px 14px;min-width:220px;max-width:320px}
+.nps-valor{font-size:34px;font-weight:700;line-height:1.1}.positivo-tx{color:var(--ac)}.atencao-tx{color:#a37b00}
 </style></head><body>
 {% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
@@ -517,16 +561,30 @@ function abrir(id, tel) {
 </script>{% endblock %}""",
 
     "respostas.html": """{% extends 'base.html' %}{% block corpo %}
-<div class="card"><form method="get" class="linha"><label>Dia da visita/pedido</label>
-<input type="date" name="data" value="{{ dia.isoformat() }}" max="{{ (hoje - timedelta(days=1)).isoformat() }}" style="width:auto">
+{% set periodo %}{% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% else %}{{ periodo }}{% endif %}{% endset %}
+<div class="card"><div class="topo-resp"><div class="filtros">
+<form method="get" class="linha"><label>Dia da visita/pedido</label>
+<input type="date" name="data" value="{{ dia.isoformat() if not mes else '' }}" max="{{ (hoje - timedelta(days=1)).isoformat() }}" style="width:auto">
 <button class="btn2">Ver</button></form>
+<form method="get" class="linha"><label>Mês das pesquisas</label>
+<select name="mes" onchange="this.form.submit()"><option value="">escolha o mês</option>{% for a, m in meses %}
+<option value="{{ '%d-%02d' % (a, m) }}"{{ ' selected' if mes == '%d-%02d' % (a, m) }}>{{ nome_do_mes(a, m) }}</option>{% endfor %}</select>
+<noscript><button class="btn2">Ver</button></noscript></form>
+{% if mes %}<p class="quieto" style="margin:0">Mostrando o mês inteiro. Para ver um dia só, escolha o dia acima.</p>{% endif %}
+</div>
+<div class="nps"><div class="quieto">NPS de {{ mes_nps }}</div>
+{% if nps %}<div class="nps-valor {{ 'positivo-tx' if nps.valor >= 50 else 'atencao-tx' if nps.valor >= 0 else 'erro' }}">{{ nps.valor }}</div>
+<div class="quieto">{{ nps.faixa }} · {{ nps.total }} nota{{ 's' if nps.total != 1 }}</div>
+<div class="quieto">{{ nps.promotores }} promotores (9–10) · {{ nps.neutros }} neutros (7–8) · {{ nps.detratores }} detratores (0–6)</div>
+{% if nps.estimadas %}<div class="quieto">{{ nps.estimadas }} nota{{ 's' if nps.estimadas != 1 }} estimada{{ 's' if nps.estimadas != 1 }} pela IA</div>{% endif %}
+{% else %}<div class="nps-valor quieto">—</div><div class="quieto">Nenhuma nota neste mês ainda.</div>{% endif %}</div></div>
 <p class="resumo">{{ contagem }}</p>
 <div class="linha">{% if ia_ok %}<form method="post" action="{{ url_for('respostas_analisar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
-<input type="hidden" name="data" value="{{ dia.isoformat() }}"><button class="btn2">Analisar agora</button></form>{% else %}<span class="quieto">IA não configurada (ANTHROPIC_API_KEY).</span>{% endif %}
-{% if rows %}<a class="btn btn2" href="{{ url_for('respostas_csv', data=dia.isoformat()) }}">Baixar planilha (CSV)</a>{% endif %}
+{{ periodo }}<button class="btn2">Analisar agora</button></form>{% else %}<span class="quieto">IA não configurada (ANTHROPIC_API_KEY).</span>{% endif %}
+{% if rows %}<a class="btn btn2" href="{{ url_for('respostas_csv', mes=mes) if mes else url_for('respostas_csv', data=dia.isoformat()) }}">Baixar planilha (CSV)</a>{% endif %}
 {% if wa_ok and positivas %}<form method="post" action="{{ url_for('respostas_enviar_positivas') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
-<input type="hidden" name="data" value="{{ dia.isoformat() }}">
-<button onclick="if(!confirm('Mandar a resposta sugerida para as {{ positivas }} avaliação(ões) 🟢 de uma vez?'))return false;this.disabled=true;this.form.submit();return false">Enviar todas as 🟢 ({{ positivas }})</button></form>{% endif %}</div>
+{{ periodo }}
+<button onclick="if(!confirm('Mandar a resposta sugerida para as {{ positivas }} avaliação(ões) 🟢 {{ 'do mês' if mes else 'do dia' }} de uma vez?'))return false;this.disabled=true;this.form.submit();return false">Enviar todas as 🟢 ({{ positivas }})</button></form>{% endif %}</div>
 <p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
 {% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
 <div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}</span><span class="tag">Versão {{ r.versao }}</span>
@@ -539,19 +597,19 @@ function abrir(id, tel) {
 {% elif f.midia_id and f.midia_tipo == 'image' %}<div class="fala">📷 Foto{% if wa_ok %} <a href="{{ url_for('midia', mensagem_id=f.id) }}" target="_blank" rel="noopener">abrir</a>{% endif %}{{ f.texto[6:] }}</div>
 {% else %}<div class="fala">{{ f.texto }}</div>{% endif %}{% endfor %}
 {% if r.audio_pendente %}<form method="post" action="{{ url_for('respostas_audio', resposta_id=r.id) }}" class="cli">
-<input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<input type="hidden" name="csrf" value="{{ session['csrf'] }}">{{ periodo }}
 <textarea name="texto" aria-label="O que o cliente disse no áudio" placeholder="Ouça o áudio e escreva aqui o que o cliente disse. A IA refaz a nota e a resposta."></textarea>
 <div class="linha"><button class="btn2">Salvar o que o cliente disse</button></div></form>{% endif %}
 {% if r.resumo %}<p><b>Resumo:</b> {{ r.resumo }}</p>{% endif %}
 {% if r.motivo_revisao %}<p class="erro">Revisar: {{ r.motivo_revisao }}</p>{% endif %}
 {% if r.acao_sugerida %}<p><b>Ação sugerida:</b> {{ r.acao_sugerida }}</p>{% endif %}
 {% if r.status in (R.REVISAR, R.PODE_ENVIAR) %}<form method="post" action="{{ url_for('respostas_enviar', resposta_id=r.id) }}" class="cli">
-<input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="data" value="{{ dia.isoformat() }}">
+<input type="hidden" name="csrf" value="{{ session['csrf'] }}">{{ periodo }}
 <textarea name="texto" aria-label="Resposta">{{ r.resposta_sugerida }}</textarea>
 <div class="linha">{% if wa_ok %}<button>Enviar resposta</button>{% endif %}
 <button class="btn2" formaction="{{ url_for('respostas_ignorar', resposta_id=r.id) }}">Não responder</button></div></form>
 {% elif r.status == R.RESPONDIDO %}<p class="ok">✓ Respondido: {{ r.resposta_sugerida }}</p>{% endif %}
-</div>{% else %}<div class="card quieto">Nenhuma resposta para as visitas deste dia ainda.</div>{% endfor %}
+</div>{% else %}<div class="card quieto">Nenhuma resposta para as visitas {{ 'deste mês' if mes else 'deste dia' }} ainda.</div>{% endfor %}
 {% if fora %}<div class="card"><h3 style="margin-top:0">Fora da lista</h3><p class="quieto">Mensagens de números que não estão na lista. Não foram ligadas a ninguém.</p>
 <table><tr><th>Quando</th><th>Telefone</th><th>Mensagem</th></tr>{% for m in fora %}<tr><td>{{ m.quando }}</td>
 <td>{{ mascarar(m.telefone) }}</td><td>{{ m.texto }}</td></tr>{% endfor %}</table></div>{% endif %}

@@ -538,3 +538,30 @@ def test_sugestoes_antigas_citando_visitas_vao_para_revisao(engine):
                                                resposta_sugerida="Oi! Já é a sua terceira visita!"))
     automacao.rodar_uma_vez(engine, automacao.Config(), agora=AGORA)
     assert _resposta(engine).status == respostas.REVISAR
+
+
+def test_nps_do_mes_e_filtro_por_mes(app_wa, engine):
+    app, _ = app_wa
+    _enviar_tudo(engine)
+    _receber(engine, "Nota 10", wa_id="a")
+    _receber(engine, "Nota 3", telefone="5511900000025", wa_id="b")
+    respostas.processar_pendentes(engine, lambda c, t, h: analise(nota=3) if "3" in t[0] else analise(estimada=True),
+                                  agora=AGORA)
+    n = respostas.nps(engine, date(2026, 10, 1), date(2026, 10, 31))
+    assert (n["valor"], n["promotores"], n["detratores"], n["neutros"], n["estimadas"]) == (0, 1, 1, 0, 1)
+    assert n["faixa"] == "Aperfeiçoamento"
+    assert respostas.nps(engine, date(2026, 9, 1), date(2026, 9, 30)) is None
+    assert respostas.meses_com_respostas(engine) == [(2026, 10)]
+    c, csrf = _logado(app)
+    dia = c.get("/respostas?data=2026-10-02").get_data(as_text=True)
+    assert "NPS de outubro/2026" in dia and 'value="2026-10">outubro/2026' in dia
+    mes = c.get("/respostas?mes=2026-10").get_data(as_text=True)
+    assert "Mostrando o mês inteiro" in mes and "Nota 10" in mes and "Nota 3" in mes
+    assert 'value="2026-10" selected' in mes and 'name="mes" value="2026-10"' in mes
+    csv = c.get("/respostas/planilha.csv?mes=2026-10")
+    assert "pos-venda-2026-10.csv" in csv.headers["Content-Disposition"] and len(csv.get_data(as_text=True).splitlines()) == 3
+    rid = _resposta(engine).id
+    r = c.post(f"/respostas/{rid}/ignorar", data={"csrf": csrf, "mes": "2026-10"})
+    assert "mes=2026-10" in r.headers["Location"]
+    vazio = c.get("/respostas?mes=2026-09").get_data(as_text=True)
+    assert "Nenhuma nota neste mês ainda" in vazio and "deste mês" in vazio
