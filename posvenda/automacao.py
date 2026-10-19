@@ -218,6 +218,9 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     if travar(engine, "revisar-visitas:v1"):  # regra de 17/10/2026: nunca citar quantas vezes o cliente veio
         n = respostas.revisar_respostas_com_visitas(engine)
         registrar(engine, "revisar-visitas:v1", f"{n} sugestão(ões) citando visitas foram para revisão")
+    if buscar is not None and travar(engine, "reler-pratos:v1"):  # 19/10/2026: prato favorito na tela Clientes
+        n = historico.reler_tudo(engine)
+        registrar(engine, "reler-pratos:v1", f"{n} bloco(s) do histórico serão relidos para gravar os pratos")
     if transcrever is not None and whatsapp is not None:  # antes da análise, para a IA já ler o que foi dito
         try:
             transcrever_audios(engine, whatsapp.baixar_midia, transcrever, agora)

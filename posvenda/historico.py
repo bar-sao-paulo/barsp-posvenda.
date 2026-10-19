@@ -11,7 +11,9 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Callable, Iterable
 
-from sqlalchemy import and_, insert, select
+from collections import Counter
+
+from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -50,27 +52,62 @@ def blocos_pendentes(engine: Engine, hoje: date) -> list[date]:
 
 
 def gravar(engine: Engine, sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> int:
-    """Grava as visitas das comandas entre `de` e `ate`. Devolve quantas eram novas."""
+    """Grava as visitas (e o prato principal de cada uma) das comandas entre `de` e `ate`. Devolve quantas eram
+    novas. Visita já gravada sem prato ganha o prato."""
+    sessoes = list(sessoes)
     achadas = lista.visitas_das_sessoes(sessoes, de, ate)
     if not achadas:
         return 0
+    pratos = lista.pratos_das_sessoes(sessoes, de, ate)
     with engine.connect() as con:
-        ja = {(r.chave, r.dia) for r in con.execute(select(visitas.c.chave, visitas.c.dia).where(and_(
-            visitas.c.dia >= de, visitas.c.dia <= ate)))}
-    novas = sorted(achadas - ja)
+        ja = {(r.chave, r.dia): r.prato for r in con.execute(select(visitas.c.chave, visitas.c.dia, visitas.c.prato)
+                                                               .where(and_(visitas.c.dia >= de, visitas.c.dia <= ate)))}
+    sem_prato = [(k, pratos[k]) for k, p in ja.items() if p is None and pratos.get(k)]
+    if sem_prato:
+        with engine.begin() as con:
+            for (c, d), prato in sem_prato:
+                con.execute(update(visitas).where(and_(visitas.c.chave == c, visitas.c.dia == d))
+                            .values(prato=prato[:200]))
+    novas = sorted(achadas - set(ja))
     if not novas:
         return 0
+    linhas = [{"chave": c, "dia": d, "prato": (pratos.get((c, d)) or "")[:200] or None} for c, d in novas]
     try:
         with engine.begin() as con:
-            con.execute(insert(visitas), [{"chave": c, "dia": d} for c, d in novas])
+            con.execute(insert(visitas), linhas)
     except IntegrityError:  # outra rotina gravou parte ao mesmo tempo: grava uma a uma
-        for c, d in novas:
+        for linha in linhas:
             try:
                 with engine.begin() as con:
-                    con.execute(insert(visitas).values(chave=c, dia=d))
+                    con.execute(insert(visitas).values(**linha))
             except IntegrityError:
                 pass
     return len(novas)
+
+
+def reler_tudo(engine: Engine) -> int:
+    """Esquece os blocos já lidos para o agendador reler os 12 meses (as visitas ficam; ganham o prato)."""
+    with engine.begin() as con:
+        return con.execute(delete(historico_blocos)).rowcount
+
+
+def pratos_favoritos(engine: Engine, telefones: Iterable[str], hoje: date) -> dict[str, str]:
+    """chave do telefone -> prato principal que o cliente mais pediu nos últimos 12 meses (empate: o mais recente)."""
+    chaves = {lista.chave_telefone(t) for t in telefones if t}
+    if not chaves:
+        return {}
+    por_chave: dict[str, list[tuple[date, str]]] = {}
+    with engine.connect() as con:
+        for r in con.execute(select(visitas.c.chave, visitas.c.dia, visitas.c.prato).where(and_(
+                visitas.c.chave.in_(chaves), visitas.c.dia >= hoje - timedelta(days=DIAS),
+                visitas.c.prato.is_not(None)))):
+            por_chave.setdefault(r.chave, []).append((r.dia, r.prato))
+    saida = {}
+    for chave, lista_ in por_chave.items():
+        conta = Counter(p for _, p in lista_)
+        ultimo = {p: d for d, p in sorted(lista_)}
+        saida[chave] = max(conta, key=lambda p: (conta[p], ultimo[p]))
+    return saida
 
 
 def janela_do_bloco(inicio: date) -> tuple[datetime, datetime]:

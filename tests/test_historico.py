@@ -113,3 +113,40 @@ def test_agendador_le_o_historico_e_aguenta_falha(engine):
         raise RuntimeError("Takeat fora do ar")
     automacao.rodar_uma_vez(engine, automacao.Config(), buscar=quebrado, agora=agora)  # não derruba a rotina
     assert len(historico.blocos_pendentes(engine, HOJE)) > 0
+
+
+def test_prato_favorito_e_o_prato_principal_mais_pedido(engine):
+    tel = "(11) 90000-0040"
+    dias = [("2026-07-01", "Parmegiana de Filé 2 Pessoas", "Chopp Brahma"), ("2026-08-01", "Risoto de Camarão", "Suco"),
+            ("2026-09-01", "Parmegiana de Filé 2 Pessoas", "Arroz Branco"), ("2026-09-20", "Risoto de Camarão", None)]
+    for dia, prato, outro in dias:
+        itens = [pedido(prato, 120.0)] + ([pedido(outro, 15.0)] if outro else [])
+        historico.gravar(engine, [sessao(f"{dia}T15:00:00Z", conta("Fulana", tel, *itens))],
+                         date.fromisoformat(dia), date.fromisoformat(dia))
+    # Só bebida no dia: não vira prato.
+    historico.gravar(engine, [sessao("2026-09-25T15:00:00Z", conta("Fulana", tel, pedido("Chopp Brahma", 14.9)))],
+                     date(2026, 9, 25), date(2026, 9, 25))
+    # Empate 2 x 2: fica o mais recente.
+    assert historico.pratos_favoritos(engine, ["5511900000040"], HOJE) == {"1100000040": "Risoto de Camarão"}
+    historico.gravar(engine, [sessao("2026-09-28T15:00:00Z", conta("Fulana", tel, pedido("Parmegiana de Filé", 99.0),
+                                                                    pedido("Pepsi Lata", 7.0)))],
+                     date(2026, 9, 28), date(2026, 9, 28))
+    assert historico.pratos_favoritos(engine, ["5511900000040"], HOJE) == {"1100000040": "Parmegiana de Filé"}
+
+
+def test_visita_antiga_sem_prato_ganha_o_prato_ao_reler(engine):
+    from sqlalchemy import insert
+    from posvenda.db import visitas
+    with engine.begin() as con:
+        con.execute(insert(visitas).values(chave="1100000041", dia=date(2026, 9, 1)))
+    historico.gravar(engine, [sessao("2026-09-01T15:00:00Z", conta("Beltrano", "(11) 90000-0041",
+                                                                   pedido("Paulistinha", 59.0)))],
+                     date(2026, 9, 1), date(2026, 9, 1))
+    assert historico.pratos_favoritos(engine, ["11900000041"], HOJE) == {"1100000041": "Paulistinha"}
+    agora = datetime(2026, 10, 3, 15, 0, tzinfo=timezone.utc)
+    historico.carregar(engine, TakeatFalso(), HOJE, limite=10)
+    antes = len(historico.blocos_pendentes(engine, HOJE))
+    automacao.rodar_uma_vez(engine, automacao.Config(), buscar=TakeatFalso(), agora=agora)  # reler-pratos:v1
+    assert len(historico.blocos_pendentes(engine, HOJE)) == antes + 10 - 4  # esqueceu os 10 e já releu 4
+    automacao.rodar_uma_vez(engine, automacao.Config(), buscar=TakeatFalso(), agora=agora)  # só uma vez
+    assert len(historico.blocos_pendentes(engine, HOJE)) == antes + 10 - 8

@@ -279,6 +279,28 @@ def visitas_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) 
     return saida
 
 
+def pratos_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> dict[tuple[str, date], str]:
+    """(chave do telefone, dia) -> prato principal do dia (o mais caro entre as contas do mesmo telefone)."""
+    saida: dict[tuple[str, date], tuple[str, float]] = {}
+    for s in sessoes:
+        if (s.get("status") or "").lower() == "canceled" or s.get("delivery_canceled_at"):
+            continue
+        dia = _data_local(s.get("start_time"))
+        if dia is None or not (de <= dia <= ate):
+            continue
+        for bill in s.get("bills") or []:
+            tel = normalizar_telefone((bill.get("buyer") or {}).get("phone"))
+            prato = prato_principal(bill)
+            if not tel or not prato:
+                continue
+            preco = max((_preco(p.get("price")) for c in bill.get("order_baskets") or [] for p in c.get("orders") or []
+                         if limpar_prato(((p.get("product") or {}).get("name")) or "") == prato), default=0.0)
+            k = (chave_telefone(tel), dia)
+            if k not in saida or preco > saida[k][1]:
+                saida[k] = (prato, preco)
+    return {k: v[0] for k, v in saida.items()}
+
+
 # --------------------------------------------------------------------------- filtros e versões
 @dataclass
 class Envio:

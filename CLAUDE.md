@@ -38,11 +38,11 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `servico.py` | Lista do dia no banco (gerar, obter, marcar enviado, não enviar, CSV); `preencher_itens` completa os itens das listas antigas |
 | `db.py` | Tabelas SQLAlchemy (`envios`, `nao_enviados`, `bloqueios`, `buscas`, `mensagens`, `respostas`, `rotinas`); colunas novas em `_COLUNAS_NOVAS` |
 | `takeat.py` | Cliente da Takeat (API key → token com escopo `table-sessions:read`; para a tela Clientes, `clube:read`) |
-| `clientes.py` | Tela Clientes: Clube de Fidelidade do Takeat (`GET /v2/clube/clients`, `md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md`), do que mais pediu (`visits`) para o que menos pediu, busca por nome/telefone, seleção e botão que abre o `wa.me` com a mensagem, um cliente por vez (quem está em Não enviar não pode ser marcado); só em memória por 1 h |
+| `clientes.py` | Tela Clientes: Clube de Fidelidade do Takeat (`GET /v2/clube/clients`, `md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md`), do que mais pediu (`visits`) para o que menos pediu, prato favorito (do nosso histórico, nunca bebida ou acompanhamento; o `favorite_product` do Clube não é usado), busca por nome/telefone, seleção e botão que abre o `wa.me` com a mensagem, um cliente por vez (quem está em Não enviar não pode ser marcado); só em memória por 1 h |
 | `whatsapp.py` | WhatsApp Cloud API (modelo, texto, situação e registro do número, download de áudio/foto) e leitura/assinatura do webhook |
 | `ia.py` | Análise da resposta com o Claude (`claude-opus-5-5`, saída em JSON) |
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
-| `historico.py` | Compras do cliente nos últimos 12 meses (dias com comanda, tabela `visitas`), lidas do Takeat em blocos de 3 dias (`historico_blocos`) pelo agendador |
+| `historico.py` | Compras do cliente nos últimos 12 meses (dias com comanda, tabela `visitas`, com o prato principal do dia; `pratos_favoritos` = prato mais pedido, para a tela Clientes), lidas do Takeat em blocos de 3 dias (`historico_blocos`) pelo agendador |
 | `transcricao.py` | Transcrição dos áudios (OpenAI `audio/transcriptions`, liga com `OPENAI_API_KEY`; modelo em `TRANSCRICAO_MODELO`) |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
 | `api_resumo.py` | `GET /api/resumo` (só leitura, `Authorization: Bearer PAINEL_API_TOKEN`): números do pós-venda por mês (enviadas, respostas, nota média, gravidades), sem nenhum dado de cliente, para o painel financeiro |
