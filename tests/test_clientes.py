@@ -80,6 +80,12 @@ def test_pagina_clientes_e_planilha():
     assert "3 de 4 clientes do Clube" in html and "Carla Fictícia" in html and "Davi" not in html
     assert html.index("Carla") < html.index("Bruno") < html.index("Ana")
     assert "R$ 1200,00" in html and "não enviar" in html and "90000-0003" not in html
+    assert 'data-tel="5511900000003" data-nome="Carla"' in html and 'data-tel="5511900000002"' not in html  # bloqueado
+    busca = c.get("/clientes?topo=todos&busca=fictícia+carla").get_data(as_text=True)
+    assert "0 de 4" in busca
+    busca = c.get("/clientes?topo=todos&busca=CARLA").get_data(as_text=True)
+    assert "1 de 4" in busca and "Carla Fictícia" in busca
+    assert "1 de 4" in c.get("/clientes?topo=todos&busca=0000-0001").get_data(as_text=True)
     csv = c.get("/clientes/planilha.csv?topo=todos&minimo=0").get_data(as_text=True).splitlines()
     assert csv[1] == "1;Carla Fictícia;5511900000003;12;1200,00;Brownie" and len(csv) == 5
 

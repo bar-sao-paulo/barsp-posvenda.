@@ -288,7 +288,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             minimo = max(0, int(request.values.get("minimo") or 0))
         except ValueError:
             minimo = 0
-        return (int(topo) if topo.isdigit() and int(topo) in TOPOS else None), minimo
+        return (int(topo) if topo.isdigit() and int(topo) in TOPOS else None), minimo, request.values.get("busca", "")[:60]
 
     def _clientes_do_clube(atualizar: bool = False) -> tuple[list, str | None]:
         if clube is None:
@@ -304,12 +304,12 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
 
     @app.get("/clientes")
     def clientes_pagina():
-        topo, minimo = _selecao()
+        topo, minimo, busca = _selecao()
         todos, erro = _clientes_do_clube()
-        escolhidos = clientes.selecionar(todos, topo, minimo)
+        escolhidos = clientes.selecionar(todos, topo, minimo, busca)
         bloqueados = {lista.chave_telefone(b["telefone"]) for b in servico.listar_bloqueios(engine)}
         return render_template("clientes.html", todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
-                               minimo=minimo, TOPOS=TOPOS, mascarar=lista.mascarar, chave=lista.chave_telefone,
+                               minimo=minimo, busca=busca, primeiro_nome=clientes.primeiro_nome, TOPOS=TOPOS, mascarar=lista.mascarar, chave=lista.chave_telefone,
                                bloqueados=bloqueados, idade=clube.idade_minutos() if clube else None)
 
     @app.post("/clientes/atualizar")
@@ -317,16 +317,16 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         _, erro = _clientes_do_clube(atualizar=True)
         flash(erro or "Lista do Clube atualizada do Takeat.")
         return redirect(url_for("clientes_pagina", topo=request.form.get("topo", "50"),
-                                minimo=request.form.get("minimo", "0")))
+                                minimo=request.form.get("minimo", "0"), busca=request.form.get("busca", "")))
 
     @app.get("/clientes/planilha.csv")
     def clientes_csv():
-        topo, minimo = _selecao()
+        topo, minimo, busca = _selecao()
         todos, erro = _clientes_do_clube()
         if erro:
             flash(erro)
             return redirect(url_for("clientes_pagina"))
-        corpo = clientes.planilha_csv(clientes.selecionar(todos, topo, minimo))
+        corpo = clientes.planilha_csv(clientes.selecionar(todos, topo, minimo, busca))
         return Response(corpo, mimetype="text/csv; charset=utf-8",
                         headers={"Content-Disposition": "attachment; filename=clientes-mais-pedidos.csv"})
 
@@ -725,20 +725,46 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 
     "clientes.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Clientes com mais pedidos</h3>
 <p class="quieto">Clientes cadastrados no Clube de Fidelidade do Takeat. "Pedidos" é o número de visitas que o Takeat registra.</p>
-<form method="get" class="linha"><label>Mostrar os</label>
+<form method="get" class="cli"><input name="busca" value="{{ busca }}" placeholder="Buscar cliente pelo nome ou telefone" aria-label="Buscar cliente">
+<div class="linha"><label>Mostrar os</label>
 <select name="topo">{% for t in TOPOS %}<option value="{{ t }}"{{ ' selected' if topo == t }}>{{ t }}</option>{% endfor %}<option value="todos"{{ ' selected' if not topo }}>todos</option></select>
-<label>clientes com mais pedidos, com pelo menos</label><input type="number" name="minimo" min="0" value="{{ minimo }}" style="width:90px"><label>pedidos</label>
-<button class="btn2">Ver</button></form>
+<label>que mais pediram, com pelo menos</label><input type="number" name="minimo" min="0" value="{{ minimo }}" style="width:90px"><label>pedidos</label>
+<button>Buscar</button></div></form>
 {% if erro %}<p class="erro">{{ erro }}</p>{% else %}
-<p class="resumo">{{ escolhidos|length }} de {{ todos|length }} clientes do Clube</p>
-<div class="linha">{% if escolhidos %}<a class="btn btn2" href="{{ url_for('clientes_csv', topo=topo or 'todos', minimo=minimo) }}">Baixar planilha (CSV)</a>{% endif %}
+<div class="linha"><span class="resumo">{{ escolhidos|length }} de {{ todos|length }} clientes do Clube</span>
 <form method="post" action="{{ url_for('clientes_atualizar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
-<input type="hidden" name="topo" value="{{ topo or 'todos' }}"><input type="hidden" name="minimo" value="{{ minimo }}">
-<button class="btn2">Atualizar do Takeat</button></form>{% if idade is not none %}<span class="quieto">lido do Takeat há {{ idade }} min</span>{% endif %}</div>{% endif %}</div>
-{% if escolhidos %}<div class="card" style="overflow-x:auto"><table><tr><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Produto favorito</th></tr>
-{% for c in escolhidos %}<tr><td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if chave(c.telefone) in bloqueados %} <span class="tag">não enviar</span>{% endif %}</td>
+<input type="hidden" name="topo" value="{{ topo or 'todos' }}"><input type="hidden" name="minimo" value="{{ minimo }}"><input type="hidden" name="busca" value="{{ busca }}">
+<button class="btn2 mini">Atualizar do Takeat</button></form>{% if idade is not none %}<span class="quieto">lido há {{ idade }} min</span>{% endif %}</div>{% endif %}</div>
+{% if escolhidos %}<div class="card cli"><h3 style="margin:0">Mensagem</h3>
+<textarea id="msg" aria-label="Mensagem para os clientes">Oi, {nome}! </textarea>
+<p class="quieto" style="margin:0">{nome} vira o primeiro nome de cada cliente. O botão abre o WhatsApp com a mensagem pronta, um cliente por vez: confira e toque em enviar.</p>
+<div class="linha"><button id="enviar" type="button" onclick="enviarSelecionados()" disabled>Enviar mensagem aos selecionados (0)</button>
+<span id="fila" class="quieto"></span></div></div>
+<div class="card" style="overflow-x:auto"><table><tr><th><input type="checkbox" aria-label="Marcar todos" onclick="marcarTodos(this.checked)" style="width:auto"></th><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Produto favorito</th><th></th></tr>
+{% for c in escolhidos %}{% set bloq = chave(c.telefone) in bloqueados %}<tr id="c{{ loop.index }}">
+<td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
+<td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
 <td>{{ mascarar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
-<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td><td>{{ c.favorito or '—' }}</td></tr>{% endfor %}</table></div>{% endif %}
+<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td><td>{{ c.favorito or '—' }}</td>
+<td class="estado"></td></tr>{% endfor %}</table></div>
+<script>
+var fila = [], pos = 0;
+function selecionados() { return Array.prototype.slice.call(document.querySelectorAll('.sel:checked')); }
+function marcarTodos(v) { document.querySelectorAll('.sel').forEach(function (c) { c.checked = v; }); contar(); }
+function contar() { fila = []; pos = 0; var n = selecionados().length; var b = document.getElementById('enviar');
+  b.disabled = !n; b.textContent = 'Enviar mensagem aos selecionados (' + n + ')'; document.getElementById('fila').textContent = ''; }
+function enviarSelecionados() {
+  var texto = document.getElementById('msg').value.trim();
+  if (!texto || texto === 'Oi, {nome}!') { alert('Escreva a mensagem antes de enviar.'); return; }
+  if (!fila.length) { fila = selecionados(); pos = 0; }
+  var c = fila[pos]; if (!c) return;
+  window.open('https://wa.me/' + c.dataset.tel + '?text=' + encodeURIComponent(texto.split('{nome}').join(c.dataset.nome)), '_blank');
+  document.querySelector('#' + c.dataset.linha + ' .estado').innerHTML = '<span class="ok">✓ aberto</span>';
+  pos += 1; var b = document.getElementById('enviar');
+  if (pos < fila.length) { b.textContent = 'Próximo: ' + (fila[pos].dataset.nome || 'cliente') + ' (' + (pos + 1) + ' de ' + fila.length + ')'; }
+  else { b.textContent = 'Pronto: ' + fila.length + ' mensagem(ns) aberta(s)'; b.disabled = true; }
+}
+</script>{% endif %}
 {% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>

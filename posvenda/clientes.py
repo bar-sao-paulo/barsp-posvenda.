@@ -10,6 +10,7 @@ import io
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -44,10 +45,22 @@ def normalizar(dados: list[dict[str, Any]]) -> list[Cliente]:
             for c in dados]
 
 
-def selecionar(clientes: list[Cliente], topo: int | None = None, minimo: int = 0) -> list[Cliente]:
-    """Do que mais pediu para o que menos pediu (empate: quem gastou mais); só quem tem `minimo` pedidos ou mais."""
-    lista = sorted((c for c in clientes if c.pedidos >= minimo), key=lambda c: (-c.pedidos, -c.total_gasto, c.nome))
+def _sem_acento(texto: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn").lower()
+
+
+def selecionar(clientes: list[Cliente], topo: int | None = None, minimo: int = 0, busca: str = "") -> list[Cliente]:
+    """Do que mais pediu para o que menos pediu (empate: quem gastou mais); só quem tem `minimo` pedidos ou mais e,
+    com `busca`, só quem tem esse pedaço no nome (sem acento) ou no telefone."""
+    termo, digitos = _sem_acento(busca.strip()), re.sub(r"\D", "", busca)
+    lista = sorted((c for c in clientes if c.pedidos >= minimo and (
+        not termo or termo in _sem_acento(c.nome) or (len(digitos) >= 4 and digitos in c.telefone))),
+        key=lambda c: (-c.pedidos, -c.total_gasto, c.nome))
     return lista[:topo] if topo else lista
+
+
+def primeiro_nome(nome: str) -> str:
+    return nome.split()[0].capitalize() if nome.split() else ""
 
 
 class Cache:
