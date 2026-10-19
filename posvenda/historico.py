@@ -13,7 +13,7 @@ from typing import Any, Callable, Iterable
 
 from collections import Counter
 
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -89,6 +89,16 @@ def reler_tudo(engine: Engine) -> int:
     """Esquece os blocos já lidos para o agendador reler os 12 meses (as visitas ficam; ganham o prato)."""
     with engine.begin() as con:
         return con.execute(delete(historico_blocos)).rowcount
+
+
+def ultimos_pedidos(engine: Engine, telefones: Iterable[str]) -> dict[str, date]:
+    """chave do telefone -> dia da última comanda do cliente que o histórico tem."""
+    chaves = {lista.chave_telefone(t) for t in telefones if t}
+    if not chaves:
+        return {}
+    with engine.connect() as con:
+        return {r[0]: r[1] for r in con.execute(select(visitas.c.chave, func.max(visitas.c.dia))
+                                                 .where(visitas.c.chave.in_(chaves)).group_by(visitas.c.chave))}
 
 
 def pratos_favoritos(engine: Engine, telefones: Iterable[str], hoje: date) -> dict[str, str]:
