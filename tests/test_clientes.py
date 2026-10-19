@@ -85,6 +85,7 @@ def test_pagina_clientes_e_planilha():
                                                                    pedido("Mignon Acebolado", 99.0), pedido("Chopp", 15.0)))],
                      date(2026, 10, 10), date(2026, 10, 10))
     html = c.get("/clientes?topo=20&minimo=3").get_data(as_text=True)
+    assert "Último pedido" in html and "10/10/2026" in html
     assert "Prato favorito" in html and "Mignon Acebolado" in html and "Brownie" not in html
     assert "R$ 1200,00" in html and "não enviar" in html and "(11) 90000-0003" in html
     assert 'data-tel="5511900000003" data-nome="Carla"' in html and 'data-tel="5511900000002"' not in html  # bloqueado

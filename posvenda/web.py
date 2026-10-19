@@ -309,7 +309,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         escolhidos = clientes.selecionar(todos, topo, minimo, busca)
         bloqueados = {lista.chave_telefone(b["telefone"]) for b in servico.listar_bloqueios(engine)}
         pratos = historico.pratos_favoritos(engine, [c.telefone for c in escolhidos], hoje())
-        return render_template("clientes.html", pratos=pratos, carregando=not historico.completo(engine, hoje()), todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
+        ultimos = historico.ultimos_pedidos(engine, [c.telefone for c in escolhidos])
+        return render_template("clientes.html", pratos=pratos, ultimos=ultimos, carregando=not historico.completo(engine, hoje()), todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
                                minimo=minimo, busca=busca, primeiro_nome=clientes.primeiro_nome, TOPOS=TOPOS, formatar=lista.formatar_telefone, chave=lista.chave_telefone,
                                bloqueados=bloqueados, idade=clube.idade_minutos() if clube else None)
 
@@ -741,12 +742,13 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <p class="quieto" style="margin:0">{nome} vira o primeiro nome de cada cliente. O botão abre o WhatsApp com a mensagem pronta, um cliente por vez: confira e toque em enviar.</p>
 <div class="linha"><button id="enviar" type="button" onclick="enviarSelecionados()" disabled>Enviar mensagem aos selecionados (0)</button>
 <span id="fila" class="quieto"></span></div></div>
-<div class="card" style="overflow-x:auto"><table><tr><th><input type="checkbox" aria-label="Marcar todos" onclick="marcarTodos(this.checked)" style="width:auto"></th><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Prato favorito</th><th></th></tr>
+<div class="card" style="overflow-x:auto"><table><tr><th><input type="checkbox" aria-label="Marcar todos" onclick="marcarTodos(this.checked)" style="width:auto"></th><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Último pedido</th><th>Prato favorito</th><th></th></tr>
 {% for c in escolhidos %}{% set bloq = chave(c.telefone) in bloqueados %}<tr id="c{{ loop.index }}">
 <td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
 <td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
 <td style="white-space:nowrap">{{ formatar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
-<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td><td>{{ pratos.get(chave(c.telefone)) or ('carregando…' if carregando else '—') }}</td>
+<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td>
+<td>{% set u = ultimos.get(chave(c.telefone)) %}{{ u.strftime('%d/%m/%Y') if u else ('carregando…' if carregando else '—') }}</td><td>{{ pratos.get(chave(c.telefone)) or ('carregando…' if carregando else '—') }}</td>
 <td class="estado"></td></tr>{% endfor %}</table></div>
 <script>
 var fila = [], pos = 0;
