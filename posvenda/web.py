@@ -309,7 +309,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         escolhidos = clientes.selecionar(todos, topo, minimo, busca)
         bloqueados = {lista.chave_telefone(b["telefone"]) for b in servico.listar_bloqueios(engine)}
         return render_template("clientes.html", todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
-                               minimo=minimo, busca=busca, primeiro_nome=clientes.primeiro_nome, TOPOS=TOPOS, mascarar=lista.mascarar, chave=lista.chave_telefone,
+                               minimo=minimo, busca=busca, primeiro_nome=clientes.primeiro_nome, TOPOS=TOPOS, formatar=lista.formatar_telefone, chave=lista.chave_telefone,
                                bloqueados=bloqueados, idade=clube.idade_minutos() if clube else None)
 
     @app.post("/clientes/atualizar")
@@ -744,7 +744,7 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 {% for c in escolhidos %}{% set bloq = chave(c.telefone) in bloqueados %}<tr id="c{{ loop.index }}">
 <td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
 <td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
-<td>{{ mascarar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
+<td style="white-space:nowrap">{{ formatar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
 <td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td><td>{{ c.favorito or '—' }}</td>
 <td class="estado"></td></tr>{% endfor %}</table></div>
 <script>

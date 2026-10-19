@@ -79,7 +79,7 @@ def test_pagina_clientes_e_planilha():
     html = c.get("/clientes?topo=20&minimo=3").get_data(as_text=True)
     assert "3 de 4 clientes do Clube" in html and "Carla Fictícia" in html and "Davi" not in html
     assert html.index("Carla") < html.index("Bruno") < html.index("Ana")
-    assert "R$ 1200,00" in html and "não enviar" in html and "90000-0003" not in html
+    assert "R$ 1200,00" in html and "não enviar" in html and "(11) 90000-0003" in html
     assert 'data-tel="5511900000003" data-nome="Carla"' in html and 'data-tel="5511900000002"' not in html  # bloqueado
     busca = c.get("/clientes?topo=todos&busca=fictícia+carla").get_data(as_text=True)
     assert "0 de 4" in busca
