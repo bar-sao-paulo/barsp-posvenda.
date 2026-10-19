@@ -103,6 +103,7 @@ visitas = Table(
     "visitas", metadata,
     Column("chave", String(20), primary_key=True),
     Column("dia", Date, primary_key=True),
+    Column("prato", String(200)),  # prato principal do dia (item de comida mais caro), para o "prato favorito"
 )
 
 # Blocos de 3 dias do histórico já lidos no Takeat (início do bloco).
@@ -124,6 +125,7 @@ rotinas = Table(
 _COLUNAS_NOVAS = {
     "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)", "itens": "TEXT"},
     "mensagens": {"midia_id": "VARCHAR(100)", "midia_tipo": "VARCHAR(20)"},
+    "visitas": {"prato": "VARCHAR(200)"},
 }
 
 
