@@ -19,9 +19,9 @@ from jinja2 import DictLoader
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import automacao, historico, lista, respostas, servico
+from . import automacao, clientes, historico, lista, respostas, servico
 from .db import criar_engine
-from .takeat import TakeatClient, TakeatError
+from .takeat import TakeatClient, TakeatError, TakeatForbidden
 from .whatsapp import WhatsApp, WhatsAppErro, assinatura_valida, ler_webhook
 
 log = logging.getLogger("posvenda.web")
@@ -34,6 +34,15 @@ def _buscar_takeat():
     cliente = TakeatClient(chave, base_url=os.environ.get("TAKEAT_BASE_URL", "https://public-api.takeat.app"),
                            scopes=("table-sessions:read",))
     return cliente.listar_sessoes
+
+
+def _buscar_clube():
+    chave = os.environ.get("TAKEAT_API_KEY")
+    if not chave:
+        return None
+    cliente = TakeatClient(chave, base_url=os.environ.get("TAKEAT_BASE_URL", "https://public-api.takeat.app"),
+                           scopes=("clube:read",))
+    return cliente.listar_clientes_clube
 
 
 def _whatsapp():
@@ -71,7 +80,7 @@ _PADRAO = object()
 def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senha: str | None = None,
               hoje=servico.hoje_local, whatsapp=_PADRAO, classificar=_PADRAO, app_secret: str | None = None,
               verify_token: str | None = None, config: automacao.Config | None = None,
-              agendador: bool | None = None) -> Flask:
+              agendador: bool | None = None, buscar_clientes=_PADRAO) -> Flask:
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     chave = os.environ.get("SECRET_KEY")
@@ -95,6 +104,8 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     login_usuario = usuario if usuario is not None else os.environ.get("LOGIN_USUARIO", "")
     login_senha = senha if senha is not None else os.environ.get("LOGIN_SENHA", "")
     wa = _whatsapp() if whatsapp is _PADRAO else whatsapp
+    busca_clube = _buscar_clube() if buscar_clientes is _PADRAO else buscar_clientes
+    clube = clientes.Cache(busca_clube) if busca_clube else None
     classificador = _classificador() if classificar is _PADRAO else classificar
     segredo_app = app_secret if app_secret is not None else os.environ.get("WHATSAPP_APP_SECRET", "")
     token_verificacao = verify_token if verify_token is not None else os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
@@ -267,6 +278,57 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         corpo = servico.csv_lista_do_envio(servico.obter_lista(engine, dia))
         return Response(corpo, mimetype="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename=lista-do-envio-{dia.isoformat()}.csv"})
+
+    # ----------------------------------------------------------------------- clientes do Clube (Takeat)
+    TOPOS = (20, 50, 100, 200)
+
+    def _selecao() -> tuple[int | None, int]:
+        topo = request.values.get("topo", "50")
+        try:
+            minimo = max(0, int(request.values.get("minimo") or 0))
+        except ValueError:
+            minimo = 0
+        return (int(topo) if topo.isdigit() and int(topo) in TOPOS else None), minimo
+
+    def _clientes_do_clube(atualizar: bool = False) -> tuple[list, str | None]:
+        if clube is None:
+            return [], "Takeat não configurado no Railway (TAKEAT_API_KEY)."
+        try:
+            return clube.obter(atualizar), None
+        except TakeatForbidden:
+            return [], ("A chave do Takeat ainda não tem permissão para ler o Clube. No Takeat, edite as permissões "
+                        "da chave da API e marque clube:read (Clube de Fidelidade, leitura).")
+        except TakeatError as exc:
+            log.warning("Clube do Takeat indisponível: %s", exc)
+            return [], f"Não consegui ler o Clube do Takeat: {exc}"
+
+    @app.get("/clientes")
+    def clientes_pagina():
+        topo, minimo = _selecao()
+        todos, erro = _clientes_do_clube()
+        escolhidos = clientes.selecionar(todos, topo, minimo)
+        bloqueados = {lista.chave_telefone(b["telefone"]) for b in servico.listar_bloqueios(engine)}
+        return render_template("clientes.html", todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
+                               minimo=minimo, TOPOS=TOPOS, mascarar=lista.mascarar, chave=lista.chave_telefone,
+                               bloqueados=bloqueados, idade=clube.idade_minutos() if clube else None)
+
+    @app.post("/clientes/atualizar")
+    def clientes_atualizar():
+        _, erro = _clientes_do_clube(atualizar=True)
+        flash(erro or "Lista do Clube atualizada do Takeat.")
+        return redirect(url_for("clientes_pagina", topo=request.form.get("topo", "50"),
+                                minimo=request.form.get("minimo", "0")))
+
+    @app.get("/clientes/planilha.csv")
+    def clientes_csv():
+        topo, minimo = _selecao()
+        todos, erro = _clientes_do_clube()
+        if erro:
+            flash(erro)
+            return redirect(url_for("clientes_pagina"))
+        corpo = clientes.planilha_csv(clientes.selecionar(todos, topo, minimo))
+        return Response(corpo, mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": "attachment; filename=clientes-mais-pedidos.csv"})
 
     @app.route("/nao-enviar", methods=["GET", "POST"])
     def nao_enviar():
@@ -496,7 +558,7 @@ select{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;bac
 .filtros{display:grid;gap:8px}.nps{border:1px solid var(--bd);border-radius:10px;padding:10px 14px;min-width:220px;max-width:320px}
 .nps-valor{font-size:34px;font-weight:700;line-height:1.1}.positivo-tx{color:var(--ac)}.atencao-tx{color:#a37b00}
 </style></head><body>
-{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
+{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('clientes_pagina') }}">Clientes</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
 <main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main>
 <script>
@@ -659,6 +721,24 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <form method="post" class="cli"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="acao" value="ligar">
 <input name="waba" value="{{ conta }}" inputmode="numeric" pattern="[0-9]+" placeholder="Identificação da conta do WhatsApp" required style="max-width:320px">
 <div><button>Ligar o recebimento</button></div></form></div>{% endif %}
+{% endblock %}""",
+
+    "clientes.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Clientes com mais pedidos</h3>
+<p class="quieto">Clientes cadastrados no Clube de Fidelidade do Takeat. "Pedidos" é o número de visitas que o Takeat registra.</p>
+<form method="get" class="linha"><label>Mostrar os</label>
+<select name="topo">{% for t in TOPOS %}<option value="{{ t }}"{{ ' selected' if topo == t }}>{{ t }}</option>{% endfor %}<option value="todos"{{ ' selected' if not topo }}>todos</option></select>
+<label>clientes com mais pedidos, com pelo menos</label><input type="number" name="minimo" min="0" value="{{ minimo }}" style="width:90px"><label>pedidos</label>
+<button class="btn2">Ver</button></form>
+{% if erro %}<p class="erro">{{ erro }}</p>{% else %}
+<p class="resumo">{{ escolhidos|length }} de {{ todos|length }} clientes do Clube</p>
+<div class="linha">{% if escolhidos %}<a class="btn btn2" href="{{ url_for('clientes_csv', topo=topo or 'todos', minimo=minimo) }}">Baixar planilha (CSV)</a>{% endif %}
+<form method="post" action="{{ url_for('clientes_atualizar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
+<input type="hidden" name="topo" value="{{ topo or 'todos' }}"><input type="hidden" name="minimo" value="{{ minimo }}">
+<button class="btn2">Atualizar do Takeat</button></form>{% if idade is not none %}<span class="quieto">lido do Takeat há {{ idade }} min</span>{% endif %}</div>{% endif %}</div>
+{% if escolhidos %}<div class="card" style="overflow-x:auto"><table><tr><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Produto favorito</th></tr>
+{% for c in escolhidos %}<tr><td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if chave(c.telefone) in bloqueados %} <span class="tag">não enviar</span>{% endif %}</td>
+<td>{{ mascarar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
+<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td><td>{{ c.favorito or '—' }}</td></tr>{% endfor %}</table></div>{% endif %}
 {% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
