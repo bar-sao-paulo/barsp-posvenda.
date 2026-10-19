@@ -4,6 +4,8 @@ Contratos usados (fonte: docs.takeat.app):
 - POST /oauth/token, grant_type=api_key        -> md/v1/referencia/autenticacao/exchangeApiKey.md
 - GET  /v1/table-sessions?start_date&end_date  -> md/v1/referencia/pedidos/getTableSessionsV1.md
   (escopo table-sessions:read; datas em UTC; intervalo máximo de três dias; resposta = lista)
+- GET  /v2/clube/clients?page&per_page        -> md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md
+  (escopo clube:read; até 200 por página; segue pagination.next até has_more=false; sem ordenação)
 - Tratamento de 401/403/429                     -> md/v1/primeiros-passos.md, md/v1/api-key-tokens.md
 
 Decisão: cada uso troca a API key por um access token novo, restrito ao escopo necessário, e não
@@ -150,6 +152,21 @@ class TakeatClient:
         if not isinstance(dados, list):
             raise TakeatError("Resposta inesperada do Takeat em /v1/table-sessions (esperava uma lista).")
         return dados
+
+    def listar_clientes_clube(self, max_paginas: int = 100) -> list[dict[str, Any]]:
+        """Todos os clientes do Clube de Fidelidade (nome, telefone, visitas, total gasto...). Escopo: clube:read."""
+        clientes: list[dict[str, Any]] = []
+        params: dict[str, Any] = {"page": 1, "per_page": 200}
+        for _ in range(max_paginas):
+            dados = self.get("/v2/clube/clients", params=params)
+            if not isinstance(dados, dict) or not isinstance(dados.get("data"), list):
+                raise TakeatError("Resposta inesperada do Takeat em /v2/clube/clients (esperava data e pagination).")
+            clientes.extend(dados["data"])
+            pag = dados.get("pagination") or {}
+            if not pag.get("has_more") or not pag.get("next"):
+                return clientes
+            params = {**params, **pag["next"]}
+        raise TakeatError("O Clube tem páginas demais; a leitura parou para não ficar presa.")
 
 
 def _iso_utc(dt: datetime) -> str:

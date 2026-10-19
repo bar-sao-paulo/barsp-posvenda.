@@ -37,7 +37,8 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `lista.py` | Regras puras: comandas → clientes (prato principal e todos os itens do dia), filtros, versões, mensagem, link `wa.me` |
 | `servico.py` | Lista do dia no banco (gerar, obter, marcar enviado, não enviar, CSV); `preencher_itens` completa os itens das listas antigas |
 | `db.py` | Tabelas SQLAlchemy (`envios`, `nao_enviados`, `bloqueios`, `buscas`, `mensagens`, `respostas`, `rotinas`); colunas novas em `_COLUNAS_NOVAS` |
-| `takeat.py` | Cliente da Takeat (API key → token com escopo `table-sessions:read`) |
+| `takeat.py` | Cliente da Takeat (API key → token com escopo `table-sessions:read`; para a tela Clientes, `clube:read`) |
+| `clientes.py` | Tela Clientes: Clube de Fidelidade do Takeat (`GET /v2/clube/clients`, `md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md`), do que mais pediu (`visits`) para o que menos pediu; só em memória por 1 h, CSV com telefone completo |
 | `whatsapp.py` | WhatsApp Cloud API (modelo, texto, situação e registro do número, download de áudio/foto) e leitura/assinatura do webhook |
 | `ia.py` | Análise da resposta com o Claude (`claude-opus-5-5`, saída em JSON) |
 | `respostas.py` | Mensagens recebidas, PARAR, análise, travas, envio da resposta, planilha |
