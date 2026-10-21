@@ -598,7 +598,7 @@ Toque em "Abrir no WhatsApp", envie a mensagem e volte para o próximo.</p>
 <p class="quieto">Envio automático: {{ ('ligado, às %dh' % cfg.hora) if cfg.envio_automatico else 'desligado' }}{% if rotina %} · último: {{ rotina.resultado or 'rodando' }}{% endif %}.</p></div>
 
 {% for e in dados.envios %}<div class="card cli{{ ' enviado' if e.enviado_em }}" id="e{{ e.id }}">
-<div class="topo"><strong>{{ e.nome_completo or e.nome or 'Sem nome' }}</strong><span class="tag">{{ e.origem }}{% if e.local %} · {{ e.local }}{% endif %}</span>
+<div class="topo"><strong>{{ e.nome_completo or e.nome or 'Sem nome' }}</strong><span class="tag">{{ e.origem }}{% if e.local %} · {{ e.local }}{% endif %}{% if e.turno %} · {{ e.turno }}{% endif %}</span>
 <span class="tag">Versão {{ e.versao }}</span><span class="quieto">{{ e.prato or 'seu pedido' }} · {{ ver_telefone(e.id, e.telefone) }} · 🛒 {{ e.compras }}</span></div>
 {% if e.itens %}<p class="quieto"><b>Consumiu:</b> {{ e.itens }}</p>{% endif %}
 <textarea id="m{{ e.id }}" aria-label="Mensagem">{{ e.mensagem }}</textarea>
@@ -652,7 +652,7 @@ function abrir(id, tel) {
 <button onclick="if(!confirm('Mandar a resposta sugerida para as {{ positivas }} avaliação(ões) 🟢 {{ 'do mês' if mes else 'do dia' }} de uma vez?'))return false;this.disabled=true;this.form.submit();return false">Enviar todas as 🟢 ({{ positivas }})</button></form>{% endif %}</div>
 <p class="quieto">Da mais crítica para a menos crítica. 🔴 nunca sai sozinha: revise e envie.</p></div>
 {% for r in rows %}<div class="card cli {{ 'critico' if r.gravidade == R.CRITICO else 'atencao' if r.gravidade == R.ATENCAO else 'positivo' if r.gravidade == R.POSITIVO else '' }}" id="r{{ r.id }}">
-<div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}{% if r.local %} · {{ r.local }}{% endif %}</span><span class="tag">Versão {{ r.versao }}</span>
+<div class="topo"><strong>{{ r.nome_completo or r.nome or 'Sem nome' }}</strong><span class="tag">{{ r.origem }}{% if r.local %} · {{ r.local }}{% endif %}{% if r.turno %} · {{ r.turno }}{% endif %}</span><span class="tag">Versão {{ r.versao }}</span>
 <span class="quieto">{{ r.prato or 'seu pedido' }} · {{ ver_telefone(r.envio_id, r.telefone) }} · 🛒 {{ r.historico }}</span></div>
 {% if r.itens %}<p class="quieto"><b>Consumiu:</b> {{ r.itens }}</p>{% endif %}
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>

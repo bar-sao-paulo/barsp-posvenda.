@@ -34,7 +34,7 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 ## Mapa do código (`posvenda/`)
 | Arquivo | Papel |
 |---|---|
-| `lista.py` | Regras puras: comandas → clientes (prato principal, todos os itens do dia e o local: "Mesa 12" no salão por `table.table_number`, "Pedido #2163" no delivery por `session_number`), filtros, versões, mensagem, link `wa.me` |
+| `lista.py` | Regras puras: comandas → clientes (prato principal, todos os itens do dia e o local: "Mesa 12" no salão por `table.table_number`, "Pedido #2163" no delivery por `session_number`; turno: abertura antes das 17h em São Paulo = Almoço, senão Janta, como no caixa diário), filtros, versões, mensagem, link `wa.me` |
 | `servico.py` | Lista do dia no banco (gerar, obter, marcar enviado, não enviar, CSV); `preencher_itens` completa os itens das listas antigas |
 | `db.py` | Tabelas SQLAlchemy (`envios`, `nao_enviados`, `bloqueios`, `buscas`, `mensagens`, `respostas`, `rotinas`); colunas novas em `_COLUNAS_NOVAS` |
 | `takeat.py` | Cliente da Takeat (API key → token com escopo `table-sessions:read`; para a tela Clientes, `clube:read`) |

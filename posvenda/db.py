@@ -35,6 +35,7 @@ envios = Table(
     Column("itens", Text),
     # Mesa (salão) ou número do pedido (delivery), como aparece no Takeat. Nulo = ainda não buscado.
     Column("local", String(40)),
+    Column("turno", String(10)),  # "Almoço" (abriu antes das 17h) ou "Janta"
     UniqueConstraint("data_visita", "telefone", name="uq_envio_dia_telefone"),
 )
 
@@ -126,7 +127,7 @@ rotinas = Table(
 # Colunas criadas depois que a tabela já existia no Railway (migração simples por ALTER TABLE).
 _COLUNAS_NOVAS = {
     "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)", "itens": "TEXT",
-                "local": "VARCHAR(40)"},
+                "local": "VARCHAR(40)", "turno": "VARCHAR(10)"},
     "mensagens": {"midia_id": "VARCHAR(100)", "midia_tipo": "VARCHAR(20)"},
     "visitas": {"prato": "VARCHAR(200)"},
 }

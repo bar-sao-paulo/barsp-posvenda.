@@ -153,6 +153,7 @@ class Candidato:
     ifood: bool
     itens: str = ""  # tudo o que a pessoa consumiu no dia ("2x Chopp Brahma · 1x Picanha Cheff")
     local: str = ""  # "Mesa 12" no salão, "Pedido #2163" no delivery
+    turno: str = ""  # "Almoço" ou "Janta"
 
 
 def janela_utc(dia: date) -> tuple[datetime, datetime]:
@@ -173,6 +174,20 @@ def _data_local(iso: str | None) -> date | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(TZ).date()
+
+
+CORTE_DO_TURNO = time(17, 0)  # mesma regra do caixa diário: abertura antes das 17h = almoço
+
+
+def turno(iso: str | None) -> str:
+    """'Almoço' se a comanda abriu antes das 17h (horário de São Paulo), senão 'Janta'."""
+    try:
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return "Almoço" if dt.astimezone(TZ).time() < CORTE_DO_TURNO else "Janta"
 
 
 def _preco(valor: Any) -> float:
@@ -265,6 +280,7 @@ def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candid
                 ifood=ifood,
                 itens=texto_dos_itens(itens_da_conta(bill)),
                 local=local_da_sessao(s, origem == "Delivery"),
+                turno=turno(s.get("start_time")),
             ))
             por_telefone.setdefault(saida[-1].telefone, []).append(itens_da_conta(bill))
     # Mesmo telefone em várias contas do dia: o cartão mostra tudo o que a pessoa consumiu.
