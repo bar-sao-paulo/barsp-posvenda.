@@ -495,7 +495,7 @@ def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> lis
     with engine.connect() as con:
         rows = [dict(r._mapping) for r in con.execute(
             select(respostas, envios.c.data_visita, envios.c.nome_completo, envios.c.nome, envios.c.telefone,
-                   envios.c.origem, envios.c.prato, envios.c.versao, envios.c.itens)
+                   envios.c.origem, envios.c.prato, envios.c.versao, envios.c.itens, envios.c.local)
             .join(envios, envios.c.id == respostas.c.envio_id)
             .where(and_(envios.c.data_visita >= de, envios.c.data_visita <= ate)))]
     for r, (txt, n) in zip(rows, historico.compras(engine, [(r["telefone"], r["data_visita"]) for r in rows],

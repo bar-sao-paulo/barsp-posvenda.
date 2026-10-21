@@ -152,6 +152,7 @@ class Candidato:
     prato: str | None
     ifood: bool
     itens: str = ""  # tudo o que a pessoa consumiu no dia ("2x Chopp Brahma · 1x Picanha Cheff")
+    local: str = ""  # "Mesa 12" no salão, "Pedido #2163" no delivery
 
 
 def janela_utc(dia: date) -> tuple[datetime, datetime]:
@@ -225,6 +226,21 @@ def texto_dos_itens(itens: dict[str, int]) -> str:
     return " · ".join(f"{n}x {nome}" for nome, n in itens.items())
 
 
+_TIPOS_DE_MESA = {"table": "Mesa", "command": "Comanda", "comanda": "Comanda", "balcony": "Balcão", "balcao": "Balcão"}
+
+
+def local_da_sessao(s: dict[str, Any], delivery: bool) -> str:
+    """'Mesa 12' no salão (table.table_number) e 'Pedido #2163' no delivery (session_number), como no Takeat."""
+    if delivery:
+        n = s.get("session_number")
+        return f"Pedido #{n}" if n else ""
+    mesa = s.get("table") or {}
+    n = mesa.get("table_number")
+    if n in (None, ""):
+        return ""
+    return f"{_TIPOS_DE_MESA.get(str(mesa.get('table_type') or '').lower(), 'Mesa')} {n}"
+
+
 def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candidato]:
     """Um candidato por conta (bill) das comandas abertas no dia (horário de São Paulo)."""
     saida: list[Candidato] = []
@@ -248,6 +264,7 @@ def clientes_do_dia(sessoes: Iterable[dict[str, Any]], dia: date) -> list[Candid
                 prato=prato_principal(bill),
                 ifood=ifood,
                 itens=texto_dos_itens(itens_da_conta(bill)),
+                local=local_da_sessao(s, origem == "Delivery"),
             ))
             por_telefone.setdefault(saida[-1].telefone, []).append(itens_da_conta(bill))
     # Mesmo telefone em várias contas do dia: o cartão mostra tudo o que a pessoa consumiu.

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, delete, insert, or_, select, update
 from sqlalchemy.engine import Engine
 
 from . import historico, lista
@@ -86,7 +86,7 @@ def gerar_lista(engine: Engine, dia: date, buscar: BuscarSessoes, *, hoje: date 
                 con.execute(delete(envios).where(envios.c.id == r.id))
         for c in ficam:
             v = versoes[c.telefone]
-            dados = dict(nome_completo=c.nome_completo, nome=c.nome, origem=c.origem, prato=c.prato, versao=v, itens=c.itens,
+            dados = dict(nome_completo=c.nome_completo, nome=c.nome, origem=c.origem, prato=c.prato, versao=v, itens=c.itens, local=c.local,
                          mensagem=lista.montar_mensagem(v, c.nome, c.prato, dia, hoje))
             if c.telefone in existentes:
                 con.execute(update(envios).where(envios.c.id == existentes[c.telefone].id).values(**dados))
@@ -110,12 +110,16 @@ def _itens_por_telefone(candidatos: list[lista.Candidato]) -> dict[str, str]:
 
 
 def _gravar_itens(con, dia: date, candidatos: list[lista.Candidato], telefones: set[str]) -> int:
-    """Grava o que cada telefone consumiu no dia (vazio se a comanda não aparecer mais)."""
+    """Grava o que cada telefone consumiu no dia e a mesa/pedido (vazio se a comanda não aparecer mais)."""
     itens = _itens_por_telefone(candidatos)
+    locais: dict[str, str] = {}
+    for c in candidatos:
+        if c.telefone and c.local and c.telefone not in locais:
+            locais[c.telefone] = c.local
     n = 0
     for t in telefones:
         n += con.execute(update(envios).where(and_(envios.c.data_visita == dia, envios.c.telefone == t))
-                         .values(itens=itens.get(t, ""))).rowcount
+                         .values(itens=itens.get(t, ""), local=locais.get(t, ""))).rowcount
     return n
 
 
@@ -124,7 +128,7 @@ def preencher_itens(engine: Engine, buscar: BuscarSessoes, hoje: date, *, dias: 
     Devolve o dia preenchido (None se não falta nenhum)."""
     with engine.connect() as con:
         dia = con.execute(select(envios.c.data_visita).where(and_(
-            envios.c.itens.is_(None), envios.c.data_visita >= hoje - timedelta(days=dias),
+            or_(envios.c.itens.is_(None), envios.c.local.is_(None)), envios.c.data_visita >= hoje - timedelta(days=dias),
             envios.c.data_visita < hoje)).order_by(envios.c.data_visita.desc())).scalar()
     if dia is None:
         return None
@@ -132,7 +136,7 @@ def preencher_itens(engine: Engine, buscar: BuscarSessoes, hoje: date, *, dias: 
     candidatos = lista.clientes_do_dia(buscar(inicio, fim), dia)
     with engine.begin() as con:
         telefones = {r[0] for r in con.execute(select(envios.c.telefone).where(and_(
-            envios.c.data_visita == dia, envios.c.itens.is_(None))))}
+            envios.c.data_visita == dia, or_(envios.c.itens.is_(None), envios.c.local.is_(None)))))}
         _gravar_itens(con, dia, candidatos, telefones)
     return dia
 

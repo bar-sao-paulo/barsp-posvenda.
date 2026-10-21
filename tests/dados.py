@@ -11,9 +11,10 @@ def conta(nome, telefone, *itens):
             "order_baskets": [{"canceled_at": None, "orders": list(itens)}]}
 
 
-def sessao(inicio, *contas, delivery=False, canal=None, status="finished", tipo=None):
+def sessao(inicio, *contas, delivery=False, canal=None, status="finished", tipo=None, mesa=None, numero=None):
     return {"start_time": inicio, "status": status, "is_delivery": delivery, "sales_channel": canal,
-            "delivery_canceled_at": None, "table": {"table_type": tipo or ("delivery" if delivery else "table")},
+            "delivery_canceled_at": None, "session_number": numero,
+            "table": {"table_type": tipo or ("delivery" if delivery else "table"), "table_number": mesa},
             "bills": list(contas)}
 
 
