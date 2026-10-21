@@ -107,6 +107,9 @@ def test_mesa_no_salao_e_numero_do_pedido_no_delivery():
          sessao("2026-10-02T18:00:00Z", conta("Duda", "(11) 90000-0053", pedido("Paulistinha", 59.0)))]
     locais = {c.nome: c.local for c in lista.clientes_do_dia(s, DIA)}
     assert locais == {"Ana": "Mesa 12", "Bia": "Pedido #2170", "Caio": "Comanda 7", "Duda": ""}
+    # 15h e 16h UTC = 12h e 13h em São Paulo (almoço); 17h e 18h UTC = 14h e 15h (almoço também)
+    assert lista.turno("2026-10-02T19:59:00Z") == "Almoço" and lista.turno("2026-10-02T20:00:00Z") == "Janta"
+    assert {c.nome: c.turno for c in lista.clientes_do_dia(s, DIA)}["Ana"] == "Almoço"
 
 
 def test_lista_grava_a_mesa_e_completa_as_antigas():
@@ -116,7 +119,7 @@ def test_lista_grava_a_mesa_e_completa_as_antigas():
     servico.gerar_lista(e, DIA, lambda i, f: s, hoje=date(2026, 10, 3))
     assert [x["local"] for x in servico.obter_lista(e, DIA).envios] == ["Mesa 12"]
     with e.begin() as con:
-        con.execute(update(envios).values(local=None))  # lista de antes desta mudança
+        con.execute(update(envios).values(local=None, turno=None))  # lista de antes desta mudança
     assert servico.preencher_itens(e, lambda i, f: s, date(2026, 10, 3)) == DIA
     assert [x["local"] for x in servico.obter_lista(e, DIA).envios] == ["Mesa 12"]
     assert servico.preencher_itens(e, lambda i, f: s, date(2026, 10, 3)) is None
@@ -127,4 +130,4 @@ def test_lista_grava_a_mesa_e_completa_as_antigas():
     with c.session_transaction() as ss:
         csrf = ss["csrf"]
     c.post("/entrar", data={"usuario": "thais", "senha": "senha-ficticia", "csrf": csrf})
-    assert "Salão · Mesa 12" in c.get("/envio?data=2026-10-02").get_data(as_text=True)
+    assert "Salão · Mesa 12 · Almoço" in c.get("/envio?data=2026-10-02").get_data(as_text=True)
