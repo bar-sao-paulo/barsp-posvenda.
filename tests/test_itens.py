@@ -94,3 +94,37 @@ def test_pagina_e_ia_mostram_os_itens(engine):
     assert "<b>Consumiu:</b> 1x Salada Caesar · 1x Brownie" in html
     e = next(x for x in servico.obter_lista(engine, DIA).envios if x["telefone"] == JOAO)
     assert "Tudo o que consumiu: 1x Chopp Brahma" in montar_contexto(e, ["ótimo"], "sem compras registradas")
+
+
+def test_mesa_no_salao_e_numero_do_pedido_no_delivery():
+    from posvenda import lista
+    from tests.dados import conta, pedido, sessao
+    s = [sessao("2026-10-02T15:00:00Z", conta("Ana", "(11) 90000-0050", pedido("Parmegiana", 99.0)), mesa=12, numero=2163),
+         sessao("2026-10-02T16:00:00Z", conta("Bia", "(11) 90000-0051", pedido("Risoto", 79.0)), delivery=True,
+                numero=2170, mesa=0),
+         sessao("2026-10-02T17:00:00Z", conta("Caio", "(11) 90000-0052", pedido("Paulistinha", 59.0)), tipo="command",
+                mesa=7),
+         sessao("2026-10-02T18:00:00Z", conta("Duda", "(11) 90000-0053", pedido("Paulistinha", 59.0)))]
+    locais = {c.nome: c.local for c in lista.clientes_do_dia(s, DIA)}
+    assert locais == {"Ana": "Mesa 12", "Bia": "Pedido #2170", "Caio": "Comanda 7", "Duda": ""}
+
+
+def test_lista_grava_a_mesa_e_completa_as_antigas():
+    from tests.dados import sessao
+    e = criar_engine("sqlite://")
+    s = [sessao("2026-10-02T15:00:00Z", conta("Ana", "(11) 90000-0050", pedido("Parmegiana", 99.0)), mesa=12)]
+    servico.gerar_lista(e, DIA, lambda i, f: s, hoje=date(2026, 10, 3))
+    assert [x["local"] for x in servico.obter_lista(e, DIA).envios] == ["Mesa 12"]
+    with e.begin() as con:
+        con.execute(update(envios).values(local=None))  # lista de antes desta mudança
+    assert servico.preencher_itens(e, lambda i, f: s, date(2026, 10, 3)) == DIA
+    assert [x["local"] for x in servico.obter_lista(e, DIA).envios] == ["Mesa 12"]
+    assert servico.preencher_itens(e, lambda i, f: s, date(2026, 10, 3)) is None
+    app = criar_app(engine=e, buscar_sessoes=lambda i, f: s, usuario="thais", senha="senha-ficticia",
+                    hoje=lambda: date(2026, 10, 3), whatsapp=None, classificar=None)
+    c = app.test_client()
+    c.get("/entrar")
+    with c.session_transaction() as ss:
+        csrf = ss["csrf"]
+    c.post("/entrar", data={"usuario": "thais", "senha": "senha-ficticia", "csrf": csrf})
+    assert "Salão · Mesa 12" in c.get("/envio?data=2026-10-02").get_data(as_text=True)
