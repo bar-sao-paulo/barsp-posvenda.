@@ -7,7 +7,9 @@ def pedido(nome, preco, cancelado=False, qtd=1):
 
 
 def conta(nome, telefone, *itens):
+    total = sum(float(i.get("price") or 0) for i in itens)
     return {"buyer": {"name": nome, "phone": telefone} if nome or telefone else None,
+            "total_price": f"{total:.2f}", "total_service_price": f"{total * 1.1:.2f}",
             "order_baskets": [{"canceled_at": None, "orders": list(itens)}]}
 
 

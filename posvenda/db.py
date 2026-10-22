@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
+from sqlalchemy import (Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, MetaData, String, Table, Text,
                         UniqueConstraint, create_engine, inspect, text)
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
@@ -115,6 +115,7 @@ visitas = Table(
     Column("chave", String(20), primary_key=True),
     Column("dia", Date, primary_key=True),
     Column("prato", String(200)),  # prato principal do dia (item de comida mais caro), para o "prato favorito"
+    Column("valor", Float),  # soma das contas do dia com serviço (total_service_price), para o "total gasto"
 )
 
 # Blocos de 3 dias do histórico já lidos no Takeat (início do bloco).
@@ -150,7 +151,7 @@ _COLUNAS_NOVAS = {
     "envios": {"wa_message_id": "VARCHAR(100)", "wa_status": "VARCHAR(20)", "erro": "VARCHAR(300)", "itens": "TEXT",
                 "local": "VARCHAR(40)", "turno": "VARCHAR(10)"},
     "mensagens": {"midia_id": "VARCHAR(100)", "midia_tipo": "VARCHAR(20)"},
-    "visitas": {"prato": "VARCHAR(200)"},
+    "visitas": {"prato": "VARCHAR(200)", "valor": "FLOAT"},
 }
 
 

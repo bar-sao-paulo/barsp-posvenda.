@@ -221,6 +221,9 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     if buscar is not None and travar(engine, "reler-pratos:v1"):  # 19/10/2026: prato favorito na tela Clientes
         n = historico.reler_tudo(engine)
         registrar(engine, "reler-pratos:v1", f"{n} bloco(s) do histórico serão relidos para gravar os pratos")
+    if buscar is not None and travar(engine, "reler-valores:v1"):  # 22/10/2026: total gasto de quem não é do Clube
+        n = historico.reler_tudo(engine)
+        registrar(engine, "reler-valores:v1", f"{n} bloco(s) do histórico serão relidos para gravar os valores")
     if buscar is not None and travar(engine, "reler-contatos:v1"):  # 22/10/2026: todos os clientes na tela Clientes
         n = historico.reler_tudo(engine)
         registrar(engine, "reler-contatos:v1", f"{n} bloco(s) do histórico serão relidos para gravar os contatos")

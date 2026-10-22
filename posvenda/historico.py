@@ -60,19 +60,29 @@ def gravar(engine: Engine, sessoes: Iterable[dict[str, Any]], de: date, ate: dat
         return 0
     gravar_contatos(engine, lista.contatos_das_sessoes(sessoes, de, ate))
     pratos = lista.pratos_das_sessoes(sessoes, de, ate)
+    valores = lista.valores_das_sessoes(sessoes, de, ate)
     with engine.connect() as con:
-        ja = {(r.chave, r.dia): r.prato for r in con.execute(select(visitas.c.chave, visitas.c.dia, visitas.c.prato)
-                                                               .where(and_(visitas.c.dia >= de, visitas.c.dia <= ate)))}
-    sem_prato = [(k, pratos[k]) for k, p in ja.items() if p is None and pratos.get(k)]
-    if sem_prato:
+        ja = {(r.chave, r.dia): r for r in con.execute(select(visitas.c.chave, visitas.c.dia, visitas.c.prato,
+                                                              visitas.c.valor)
+                                                       .where(and_(visitas.c.dia >= de, visitas.c.dia <= ate)))}
+    faltando = {}
+    for k, r in ja.items():
+        novo = {}
+        if r.prato is None and pratos.get(k):
+            novo["prato"] = pratos[k][:200]
+        if r.valor is None and k in valores:
+            novo["valor"] = valores[k]
+        if novo:
+            faltando[k] = novo
+    if faltando:
         with engine.begin() as con:
-            for (c, d), prato in sem_prato:
-                con.execute(update(visitas).where(and_(visitas.c.chave == c, visitas.c.dia == d))
-                            .values(prato=prato[:200]))
+            for (c, d), novo in faltando.items():
+                con.execute(update(visitas).where(and_(visitas.c.chave == c, visitas.c.dia == d)).values(**novo))
     novas = sorted(achadas - set(ja))
     if not novas:
         return 0
-    linhas = [{"chave": c, "dia": d, "prato": (pratos.get((c, d)) or "")[:200] or None} for c, d in novas]
+    linhas = [{"chave": c, "dia": d, "prato": (pratos.get((c, d)) or "")[:200] or None, "valor": valores.get((c, d))}
+              for c, d in novas]
     try:
         with engine.begin() as con:
             con.execute(insert(visitas), linhas)
@@ -108,13 +118,14 @@ def gravar_contatos(engine: Engine, achados: dict[str, tuple[str, str, date]]) -
             pass
 
 
-def contatos_com_pedidos(engine: Engine, hoje: date) -> list[tuple[str, str, int]]:
-    """(telefone, nome, dias com comanda nos últimos 12 meses) de cada cliente que o histórico conhece."""
+def contatos_com_pedidos(engine: Engine, hoje: date) -> list[tuple[str, str, int, float]]:
+    """(telefone, nome, dias com comanda, total gasto) nos últimos 12 meses de cada cliente que o histórico conhece."""
     desde = hoje - timedelta(days=DIAS)
     with engine.connect() as con:
-        n = dict(con.execute(select(visitas.c.chave, func.count()).where(visitas.c.dia >= desde)
-                             .group_by(visitas.c.chave)).all())
-        return [(r.telefone, r.nome or "", int(n.get(r.chave, 0))) for r in con.execute(select(contatos))]
+        n = {r[0]: (int(r[1]), float(r[2] or 0)) for r in con.execute(
+            select(visitas.c.chave, func.count(), func.sum(visitas.c.valor)).where(visitas.c.dia >= desde)
+            .group_by(visitas.c.chave))}
+        return [(r.telefone, r.nome or "", *n.get(r.chave, (0, 0.0))) for r in con.execute(select(contatos))]
 
 
 def reler_tudo(engine: Engine) -> int:

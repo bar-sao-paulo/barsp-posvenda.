@@ -144,6 +144,7 @@ def test_clientes_fora_do_clube_vem_das_comandas():
     assert html.count("(11) 90000-0003") == 1  # quem está no Clube não repete
     html = c.get("/clientes?busca=juarez").get_data(as_text=True)
     assert "1 de 6 clientes" in html and "<strong>2</strong>" in html
+    assert "R$ 187,00" in html  # (80 + 90) com 10% de serviço
 
 
 def test_sem_clube_mostra_os_das_comandas():
