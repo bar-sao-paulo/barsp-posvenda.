@@ -291,6 +291,12 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         return (int(topo) if topo.isdigit() and int(topo) in TOPOS else None), minimo, request.values.get("busca", "")[:60]
 
     def _clientes_do_clube(atualizar: bool = False) -> tuple[list, str | None]:
+        """Clube + clientes das comandas que não estão no Clube. Sem o Clube, mostra só os das comandas e o erro."""
+        do_historico = historico.contatos_com_pedidos(engine, hoje())
+        membros, erro = _so_clube(atualizar)
+        return clientes.juntar(membros, do_historico), erro
+
+    def _so_clube(atualizar: bool) -> tuple[list, str | None]:
         if clube is None:
             return [], "Takeat não configurado no Railway (TAKEAT_API_KEY)."
         try:
@@ -337,7 +343,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     def clientes_csv():
         topo, minimo, busca = _selecao()
         todos, erro = _clientes_do_clube()
-        if erro:
+        if erro and not todos:
             flash(erro)
             return redirect(url_for("clientes_pagina"))
         corpo = clientes.planilha_csv(clientes.selecionar(todos, topo, minimo, busca))
@@ -738,14 +744,15 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 {% endblock %}""",
 
     "clientes.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Clientes com mais pedidos</h3>
-<p class="quieto">Clientes cadastrados no Clube de Fidelidade do Takeat. "Pedidos" é o número de visitas que o Takeat registra.</p>
+<p class="quieto">Todos os clientes com celular: os do Clube de Fidelidade do Takeat e os que deixaram o celular numa comanda do salão ou do delivery nos últimos 12 meses (iFood não passa o telefone).
+"Pedidos" é o número de visitas que o Clube registra; para quem não está no Clube, os dias com comanda nos últimos 12 meses.</p>
 <form method="get" class="cli"><input name="busca" value="{{ busca }}" placeholder="Buscar cliente pelo nome ou telefone" aria-label="Buscar cliente">
 <div class="linha"><label>Mostrar os</label>
 <select name="topo">{% for t in TOPOS %}<option value="{{ t }}"{{ ' selected' if topo == t }}>{{ t }}</option>{% endfor %}<option value="todos"{{ ' selected' if not topo }}>todos</option></select>
 <label>que mais pediram, com pelo menos</label><input type="number" name="minimo" min="0" value="{{ minimo }}" style="width:90px"><label>pedidos</label>
 <button>Buscar</button></div></form>
-{% if erro %}<p class="erro">{{ erro }}</p>{% else %}
-<div class="linha"><span class="resumo">{{ escolhidos|length }} de {{ todos|length }} clientes do Clube</span>
+{% if erro %}<p class="erro">{{ erro }}{% if todos %} Mostrando só os clientes das comandas.{% endif %}</p>{% endif %}
+{% if todos or not erro %}<div class="linha"><span class="resumo">{{ escolhidos|length }} de {{ todos|length }} clientes ({{ todos|selectattr('clube')|list|length }} do Clube){% if carregando %} · lendo as comandas dos últimos 12 meses…{% endif %}</span>
 <form method="post" action="{{ url_for('clientes_atualizar') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
 <input type="hidden" name="topo" value="{{ topo or 'todos' }}"><input type="hidden" name="minimo" value="{{ minimo }}"><input type="hidden" name="busca" value="{{ busca }}">
 <button class="btn2 mini">Atualizar do Takeat</button></form>{% if idade is not none %}<span class="quieto">lido há {{ idade }} min</span>{% endif %}</div>{% endif %}</div>
@@ -757,9 +764,9 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <div class="card" style="overflow-x:auto"><table><tr><th><input type="checkbox" aria-label="Marcar todos" onclick="marcarTodos(this.checked)" style="width:auto"></th><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Último pedido</th><th>Prato favorito</th><th></th></tr>
 {% for c in escolhidos %}{% set bloq = chave(c.telefone) in bloqueados %}<tr id="c{{ loop.index }}">
 <td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-completo="{{ c.nome }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
-<td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
+<td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if c.clube %} <span class="tag">Clube</span>{% endif %}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
 <td style="white-space:nowrap">{{ formatar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
-<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td>
+<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') if c.clube else '—' }}</td>
 <td>{% set u = ultimos.get(chave(c.telefone)) %}{{ u.strftime('%d/%m/%Y') if u else ('carregando…' if carregando else '—') }}</td><td>{{ pratos.get(chave(c.telefone)) or ('carregando…' if carregando else '—') }}</td>
 {% set ms = enviadas.get(chave(c.telefone), []) %}<td class="estado">{% if ms %}<button type="button" class="btn2 mini" onclick="var h=document.getElementById('h{{ loop.index }}');h.hidden=!h.hidden">✉ {{ ms|length }}</button>{% endif %}</td></tr>
 {% if ms %}<tr id="h{{ loop.index }}" hidden><td></td><td colspan="8"><b>Mensagens que você mandou para {{ primeiro_nome(c.nome) or 'este cliente' }}:</b>

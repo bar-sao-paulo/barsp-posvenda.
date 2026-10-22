@@ -1,7 +1,11 @@
-"""Clientes do Clube de Fidelidade do Takeat, do que mais pediu para o que menos pediu (tela Clientes).
+"""Todos os clientes, do que mais pediu para o que menos pediu (tela Clientes).
 
-Fonte: GET /v2/clube/clients (md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md), escopo clube:read.
-"Pedidos" = campo `visits` do Clube. A lista fica só na memória do painel por 1 hora (não é gravada no banco).
+Duas fontes, juntas pelo telefone (DDD + 8 últimos dígitos):
+- Clube de Fidelidade do Takeat: GET /v2/clube/clients
+  (md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md), escopo clube:read. "Pedidos" = `visits`.
+  A lista do Clube fica só na memória do painel por 1 hora (não é gravada no banco).
+- Quem não está no Clube: contatos das comandas com celular (tabela `contatos`, lida pelo histórico de
+  GET /v1/table-sessions). "Pedidos" = dias com comanda nos últimos 12 meses; total gasto não aparece.
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ class Cliente:
     pedidos: int
     total_gasto: float
     favorito: str
+    clube: bool = True
 
 
 def _numero(v: Any) -> float:
@@ -50,6 +55,14 @@ def normalizar(dados: list[dict[str, Any]]) -> list[Cliente]:
                     pedidos=int(c.get("visits") or 0), total_gasto=_numero(c.get("total_spent")),
                     favorito=" ".join(str(c.get("favorite_product") or "").split()))
             for c in dados]
+
+
+def juntar(clube: list[Cliente], do_historico: list[tuple[str, str, int]]) -> list[Cliente]:
+    """Clube + quem só aparece nas comandas (telefone que já está no Clube não repete)."""
+    ja = {_lista.chave_telefone(c.telefone) for c in clube if c.telefone}
+    extras = [Cliente(nome=nome, telefone=tel, pedidos=pedidos, total_gasto=0.0, favorito="", clube=False)
+              for tel, nome, pedidos in do_historico if tel and _lista.chave_telefone(tel) not in ja]
+    return list(clube) + extras
 
 
 def _sem_acento(texto: str) -> str:

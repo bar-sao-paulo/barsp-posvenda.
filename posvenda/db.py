@@ -102,6 +102,14 @@ respostas = Table(
 
 # Dias em que cada telefone teve comanda no bar (histórico de compras, últimos 12 meses).
 # Só a chave do telefone (DDD + 8 últimos dígitos) e o dia, nada do pedido.
+contatos = Table(  # quem passou pelo salão ou delivery com celular (tela Clientes, além do Clube)
+    "contatos", metadata,
+    Column("chave", String(20), primary_key=True),  # DDD + 8 últimos dígitos
+    Column("telefone", String(20), nullable=False),
+    Column("nome", String(200)),
+    Column("ultimo_dia", Date, nullable=False),
+)
+
 visitas = Table(
     "visitas", metadata,
     Column("chave", String(20), primary_key=True),

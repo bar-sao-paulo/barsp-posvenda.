@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from . import lista
-from .db import historico_blocos, visitas
+from .db import contatos, historico_blocos, visitas
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ def gravar(engine: Engine, sessoes: Iterable[dict[str, Any]], de: date, ate: dat
     achadas = lista.visitas_das_sessoes(sessoes, de, ate)
     if not achadas:
         return 0
+    gravar_contatos(engine, lista.contatos_das_sessoes(sessoes, de, ate))
     pratos = lista.pratos_das_sessoes(sessoes, de, ate)
     with engine.connect() as con:
         ja = {(r.chave, r.dia): r.prato for r in con.execute(select(visitas.c.chave, visitas.c.dia, visitas.c.prato)
@@ -83,6 +84,37 @@ def gravar(engine: Engine, sessoes: Iterable[dict[str, Any]], de: date, ate: dat
             except IntegrityError:
                 pass
     return len(novas)
+
+
+def gravar_contatos(engine: Engine, achados: dict[str, tuple[str, str, date]]) -> None:
+    """Guarda telefone e nome de cada cliente; fica o da comanda mais recente (nome vazio não apaga o que havia)."""
+    if not achados:
+        return
+    with engine.connect() as con:
+        ja = {r.chave: r for r in con.execute(select(contatos).where(contatos.c.chave.in_(list(achados))))}
+    for chave, (tel, nome, dia) in achados.items():
+        nome = nome[:200] or None
+        try:
+            with engine.begin() as con:
+                antigo = ja.get(chave)
+                if antigo is None:
+                    con.execute(insert(contatos).values(chave=chave, telefone=tel, nome=nome, ultimo_dia=dia))
+                elif dia >= antigo.ultimo_dia:
+                    con.execute(update(contatos).where(contatos.c.chave == chave).values(
+                        telefone=tel, nome=nome or antigo.nome, ultimo_dia=dia))
+                elif not antigo.nome and nome:
+                    con.execute(update(contatos).where(contatos.c.chave == chave).values(nome=nome))
+        except IntegrityError:  # outra rotina gravou o mesmo cliente ao mesmo tempo
+            pass
+
+
+def contatos_com_pedidos(engine: Engine, hoje: date) -> list[tuple[str, str, int]]:
+    """(telefone, nome, dias com comanda nos últimos 12 meses) de cada cliente que o histórico conhece."""
+    desde = hoje - timedelta(days=DIAS)
+    with engine.connect() as con:
+        n = dict(con.execute(select(visitas.c.chave, func.count()).where(visitas.c.dia >= desde)
+                             .group_by(visitas.c.chave)).all())
+        return [(r.telefone, r.nome or "", int(n.get(r.chave, 0))) for r in con.execute(select(contatos))]
 
 
 def reler_tudo(engine: Engine) -> int:
