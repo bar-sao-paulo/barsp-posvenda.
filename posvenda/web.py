@@ -745,7 +745,7 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 
     "clientes.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Clientes com mais pedidos</h3>
 <p class="quieto">Todos os clientes com celular: os do Clube de Fidelidade do Takeat e os que deixaram o celular numa comanda do salão ou do delivery nos últimos 12 meses (iFood não passa o telefone).
-"Pedidos" é o número de visitas que o Clube registra; para quem não está no Clube, os dias com comanda nos últimos 12 meses.</p>
+"Pedidos" é o número de visitas que o Clube registra; para quem não está no Clube, os dias com comanda nos últimos 12 meses, e o total gasto é a soma das contas (com serviço) nesse período.</p>
 <form method="get" class="cli"><input name="busca" value="{{ busca }}" placeholder="Buscar cliente pelo nome ou telefone" aria-label="Buscar cliente">
 <div class="linha"><label>Mostrar os</label>
 <select name="topo">{% for t in TOPOS %}<option value="{{ t }}"{{ ' selected' if topo == t }}>{{ t }}</option>{% endfor %}<option value="todos"{{ ' selected' if not topo }}>todos</option></select>
@@ -766,7 +766,7 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-completo="{{ c.nome }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
 <td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if c.clube %} <span class="tag">Clube</span>{% endif %}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
 <td style="white-space:nowrap">{{ formatar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
-<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') if c.clube else '—' }}</td>
+<td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') if c.clube or c.total_gasto else ('carregando…' if carregando else '—') }}</td>
 <td>{% set u = ultimos.get(chave(c.telefone)) %}{{ u.strftime('%d/%m/%Y') if u else ('carregando…' if carregando else '—') }}</td><td>{{ pratos.get(chave(c.telefone)) or ('carregando…' if carregando else '—') }}</td>
 {% set ms = enviadas.get(chave(c.telefone), []) %}<td class="estado">{% if ms %}<button type="button" class="btn2 mini" onclick="var h=document.getElementById('h{{ loop.index }}');h.hidden=!h.hidden">✉ {{ ms|length }}</button>{% endif %}</td></tr>
 {% if ms %}<tr id="h{{ loop.index }}" hidden><td></td><td colspan="8"><b>Mensagens que você mandou para {{ primeiro_nome(c.nome) or 'este cliente' }}:</b>

@@ -337,6 +337,25 @@ def contatos_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date)
     return saida
 
 
+def valores_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> dict[tuple[str, date], float]:
+    """(chave do telefone, dia) -> soma das contas do dia com taxa de serviço (`bills[].total_service_price`;
+    sem ele, `total_price`). md/v1/referencia/pedidos/getTableSessionsV1.md"""
+    saida: dict[tuple[str, date], float] = {}
+    for s in sessoes:
+        if (s.get("status") or "").lower() == "canceled" or s.get("delivery_canceled_at"):
+            continue
+        dia = _data_local(s.get("start_time"))
+        if dia is None or not (de <= dia <= ate):
+            continue
+        for bill in s.get("bills") or []:
+            tel = normalizar_telefone((bill.get("buyer") or {}).get("phone"))
+            if tel:
+                k = (chave_telefone(tel), dia)
+                valor = bill.get("total_service_price")
+                saida[k] = saida.get(k, 0.0) + _preco(valor if valor is not None else bill.get("total_price"))
+    return saida
+
+
 def pratos_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> dict[tuple[str, date], str]:
     """(chave do telefone, dia) -> prato principal do dia (o mais caro entre as contas do mesmo telefone)."""
     saida: dict[tuple[str, date], tuple[str, float]] = {}

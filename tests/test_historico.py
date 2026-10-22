@@ -150,3 +150,21 @@ def test_visita_antiga_sem_prato_ganha_o_prato_ao_reler(engine):
     assert len(historico.blocos_pendentes(engine, HOJE)) == antes + 10 - 4  # esqueceu os 10 e já releu 4
     automacao.rodar_uma_vez(engine, automacao.Config(), buscar=TakeatFalso(), agora=agora)  # só uma vez
     assert len(historico.blocos_pendentes(engine, HOJE)) == antes + 10 - 8
+
+
+def test_valor_da_visita_e_preenchido_nas_visitas_antigas():
+    from sqlalchemy import select, update
+
+    from posvenda.db import visitas
+    engine = criar_engine("sqlite://")
+    dia = date(2026, 10, 10)
+    s = [sessao("2026-10-10T15:00:00Z", conta("Ana Fictícia", "(11) 90000-0051", pedido("Parmegiana", 80.0)),
+                conta("Ana de Novo", "(11) 90000-0051", pedido("Pudim", 20.0)))]
+    historico.gravar(engine, s, dia, dia)
+    with engine.begin() as con:
+        assert con.execute(select(visitas.c.valor)).scalar() == 110.0  # duas contas do dia, com serviço
+        con.execute(update(visitas).values(valor=None))  # visita gravada antes da coluna existir
+    historico.gravar(engine, s, dia, dia)
+    with engine.connect() as con:
+        assert con.execute(select(visitas.c.valor)).scalar() == 110.0
+    assert historico.contatos_com_pedidos(engine, date(2026, 10, 22)) == [("5511900000051", "Ana de Novo", 1, 110.0)]

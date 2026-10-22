@@ -5,7 +5,7 @@ Duas fontes, juntas pelo telefone (DDD + 8 últimos dígitos):
   (md/v1/referencia/clube-de-fidelidade/getClubeClientsV1PaginatedV2.md), escopo clube:read. "Pedidos" = `visits`.
   A lista do Clube fica só na memória do painel por 1 hora (não é gravada no banco).
 - Quem não está no Clube: contatos das comandas com celular (tabela `contatos`, lida pelo histórico de
-  GET /v1/table-sessions). "Pedidos" = dias com comanda nos últimos 12 meses; total gasto não aparece.
+  GET /v1/table-sessions). "Pedidos" = dias com comanda e "Total gasto" = soma das contas com serviço, nos últimos 12 meses.
 """
 from __future__ import annotations
 
@@ -57,11 +57,11 @@ def normalizar(dados: list[dict[str, Any]]) -> list[Cliente]:
             for c in dados]
 
 
-def juntar(clube: list[Cliente], do_historico: list[tuple[str, str, int]]) -> list[Cliente]:
+def juntar(clube: list[Cliente], do_historico: list[tuple[str, str, int, float]]) -> list[Cliente]:
     """Clube + quem só aparece nas comandas (telefone que já está no Clube não repete)."""
     ja = {_lista.chave_telefone(c.telefone) for c in clube if c.telefone}
-    extras = [Cliente(nome=nome, telefone=tel, pedidos=pedidos, total_gasto=0.0, favorito="", clube=False)
-              for tel, nome, pedidos in do_historico if tel and _lista.chave_telefone(tel) not in ja]
+    extras = [Cliente(nome=nome, telefone=tel, pedidos=pedidos, total_gasto=gasto, favorito="", clube=False)
+              for tel, nome, pedidos, gasto in do_historico if tel and _lista.chave_telefone(tel) not in ja]
     return list(clube) + extras
 
 
