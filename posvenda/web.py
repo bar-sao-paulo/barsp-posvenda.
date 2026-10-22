@@ -310,9 +310,21 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         bloqueados = {lista.chave_telefone(b["telefone"]) for b in servico.listar_bloqueios(engine)}
         pratos = historico.pratos_favoritos(engine, [c.telefone for c in escolhidos], hoje())
         ultimos = historico.ultimos_pedidos(engine, [c.telefone for c in escolhidos])
-        return render_template("clientes.html", pratos=pratos, ultimos=ultimos, carregando=not historico.completo(engine, hoje()), todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
+        enviadas = clientes.mensagens_por_cliente(engine, [c.telefone for c in escolhidos])
+        return render_template("clientes.html", pratos=pratos, ultimos=ultimos, enviadas=enviadas,
+                               recentes=clientes.ultimas_mensagens(engine), tz=lista.TZ, utc=timezone.utc, carregando=not historico.completo(engine, hoje()), todos=todos, escolhidos=escolhidos, erro=erro, topo=topo,
                                minimo=minimo, busca=busca, primeiro_nome=clientes.primeiro_nome, TOPOS=TOPOS, formatar=lista.formatar_telefone, chave=lista.chave_telefone,
                                bloqueados=bloqueados, idade=clube.idade_minutos() if clube else None)
+
+    @app.post("/clientes/mensagem")
+    def clientes_mensagem():
+        """Chamado quando o botão abre o WhatsApp: guarda a mensagem no histórico da aba Clientes."""
+        try:
+            clientes.registrar_mensagem(engine, request.form.get("telefone", ""), request.form.get("nome", ""),
+                                        request.form.get("texto", ""), g.usuario)
+        except ValueError:
+            abort(400)
+        return jsonify(ok=True)
 
     @app.post("/clientes/atualizar")
     def clientes_atualizar():
@@ -744,12 +756,14 @@ clientes escrevem. A identificação da conta aparece no WhatsApp Manager, no qu
 <span id="fila" class="quieto"></span></div></div>
 <div class="card" style="overflow-x:auto"><table><tr><th><input type="checkbox" aria-label="Marcar todos" onclick="marcarTodos(this.checked)" style="width:auto"></th><th>#</th><th>Nome</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Último pedido</th><th>Prato favorito</th><th></th></tr>
 {% for c in escolhidos %}{% set bloq = chave(c.telefone) in bloqueados %}<tr id="c{{ loop.index }}">
-<td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
+<td>{% if c.telefone and not bloq %}<input type="checkbox" class="sel" style="width:auto" aria-label="Selecionar {{ c.nome }}" data-tel="{{ c.telefone }}" data-nome="{{ primeiro_nome(c.nome) }}" data-completo="{{ c.nome }}" data-linha="c{{ loop.index }}" onchange="contar()">{% endif %}</td>
 <td>{{ loop.index }}</td><td>{{ c.nome or '—' }}{% if bloq %} <span class="tag">não enviar</span>{% endif %}</td>
 <td style="white-space:nowrap">{{ formatar(c.telefone) if c.telefone else '—' }}</td><td><strong>{{ c.pedidos }}</strong></td>
 <td>{{ ('R$ %.2f' % c.total_gasto).replace('.', ',') }}</td>
 <td>{% set u = ultimos.get(chave(c.telefone)) %}{{ u.strftime('%d/%m/%Y') if u else ('carregando…' if carregando else '—') }}</td><td>{{ pratos.get(chave(c.telefone)) or ('carregando…' if carregando else '—') }}</td>
-<td class="estado"></td></tr>{% endfor %}</table></div>
+{% set ms = enviadas.get(chave(c.telefone), []) %}<td class="estado">{% if ms %}<button type="button" class="btn2 mini" onclick="var h=document.getElementById('h{{ loop.index }}');h.hidden=!h.hidden">✉ {{ ms|length }}</button>{% endif %}</td></tr>
+{% if ms %}<tr id="h{{ loop.index }}" hidden><td></td><td colspan="8"><b>Mensagens que você mandou para {{ primeiro_nome(c.nome) or 'este cliente' }}:</b>
+{% for m in ms %}<div class="fala"><span class="quieto">{{ (m.enviado_em if m.enviado_em.tzinfo else m.enviado_em.replace(tzinfo=utc)).astimezone(tz).strftime('%d/%m/%Y %H:%M') }}{% if m.usuario %} · {{ m.usuario }}{% endif %}</span><br>{{ m.texto }}</div>{% endfor %}</td></tr>{% endif %}{% endfor %}</table></div>
 <script>
 var fila = [], pos = 0;
 function selecionados() { return Array.prototype.slice.call(document.querySelectorAll('.sel:checked')); }
@@ -762,12 +776,21 @@ function enviarSelecionados() {
   if (!fila.length) { fila = selecionados(); pos = 0; }
   var c = fila[pos]; if (!c) return;
   window.open('https://wa.me/' + c.dataset.tel + '?text=' + encodeURIComponent(texto.split('{nome}').join(c.dataset.nome)), '_blank');
+  var final = texto.split('{nome}').join(c.dataset.nome);
+  var dados = new FormData(); dados.append('csrf', '{{ session['csrf'] }}'); dados.append('telefone', c.dataset.tel);
+  dados.append('nome', c.dataset.completo || ''); dados.append('texto', final);
+  fetch('{{ url_for('clientes_mensagem') }}', {method: 'POST', body: dados});
   document.querySelector('#' + c.dataset.linha + ' .estado').innerHTML = '<span class="ok">✓ aberto</span>';
   pos += 1; var b = document.getElementById('enviar');
   if (pos < fila.length) { b.textContent = 'Próximo: ' + (fila[pos].dataset.nome || 'cliente') + ' (' + (pos + 1) + ' de ' + fila.length + ')'; }
   else { b.textContent = 'Pronto: ' + fila.length + ' mensagem(ns) aberta(s)'; b.disabled = true; }
 }
 </script>{% endif %}
+{% if recentes %}<div class="card" style="overflow-x:auto"><h3 style="margin-top:0">Mensagens enviadas pela aba Clientes</h3>
+<p class="quieto">Só as mensagens avulsas (promoção, cupom...). Ficam separadas da pesquisa: a resposta do cliente chega no WhatsApp de quem enviou, não na aba Respostas.</p>
+<table><tr><th>Quando</th><th>Cliente</th><th>Telefone</th><th>Mensagem</th></tr>{% for m in recentes %}<tr>
+<td style="white-space:nowrap">{{ (m.enviado_em if m.enviado_em.tzinfo else m.enviado_em.replace(tzinfo=utc)).astimezone(tz).strftime('%d/%m %H:%M') }}</td>
+<td>{{ m.nome or '—' }}</td><td style="white-space:nowrap">{{ formatar(m.telefone) }}</td><td>{{ m.texto }}</td></tr>{% endfor %}</table></div>{% endif %}
 {% endblock %}""",
 
     "nao_enviar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Não enviar a pesquisa</h3>
