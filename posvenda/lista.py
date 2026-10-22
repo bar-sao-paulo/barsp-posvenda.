@@ -312,6 +312,31 @@ def visitas_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) 
     return saida
 
 
+def contatos_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> dict[str, tuple[str, str, date]]:
+    """chave do telefone -> (telefone, nome, dia) da comanda mais recente com celular entre `de` e `ate`
+    (tela Clientes: quem não está no Clube). iFood fica de fora; nome vazio só se nenhuma comanda tiver nome."""
+    saida: dict[str, tuple[str, str, date]] = {}
+    for s in sorted(sessoes, key=lambda x: x.get("start_time") or ""):
+        if (s.get("status") or "").lower() == "canceled" or s.get("delivery_canceled_at"):
+            continue
+        if (s.get("sales_channel") or "").upper() == "IFOOD":
+            continue
+        dia = _data_local(s.get("start_time"))
+        if dia is None or not (de <= dia <= ate):
+            continue
+        for bill in s.get("bills") or []:
+            buyer = bill.get("buyer") or {}
+            tel = normalizar_telefone(buyer.get("phone"))
+            if not tel:
+                continue
+            nome = " ".join((buyer.get("name") or "").split())
+            if not primeiro_nome(nome):  # "Mesa 4", "Cliente": não é nome de gente
+                nome = ""
+            k = chave_telefone(tel)
+            saida[k] = (tel, nome or (saida[k][1] if k in saida else ""), dia)
+    return saida
+
+
 def pratos_das_sessoes(sessoes: Iterable[dict[str, Any]], de: date, ate: date) -> dict[tuple[str, date], str]:
     """(chave do telefone, dia) -> prato principal do dia (o mais caro entre as contas do mesmo telefone)."""
     saida: dict[tuple[str, date], tuple[str, float]] = {}

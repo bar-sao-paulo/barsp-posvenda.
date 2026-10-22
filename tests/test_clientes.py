@@ -77,7 +77,7 @@ def test_pagina_clientes_e_planilha():
     c, engine = _app(lambda: CLUBE)
     servico.bloquear(engine, "5511900000002", "pediu")
     html = c.get("/clientes?topo=20&minimo=3").get_data(as_text=True)
-    assert "3 de 4 clientes do Clube" in html and "Carla Fictícia" in html and "Davi" not in html
+    assert "3 de 4 clientes (4 do Clube)" in html and "Carla Fictícia" in html and "Davi" not in html
     assert html.index("Carla") < html.index("Bruno") < html.index("Ana")
     from posvenda import historico
     from tests.dados import conta, pedido, sessao
@@ -121,3 +121,41 @@ def test_mensagens_da_aba_clientes_ficam_separadas_da_pesquisa():
     assert 'data-completo="Carla Fictícia"' in html
     with engine.connect() as con:  # nada vai para as mensagens da pesquisa
         assert con.execute(select(func.count()).select_from(mensagens)).scalar() == 0
+
+
+def test_clientes_fora_do_clube_vem_das_comandas():
+    from posvenda import historico
+    from tests.dados import conta, pedido, sessao
+    c, engine = _app(lambda: CLUBE)
+    dia = date(2026, 10, 10)
+    historico.gravar(engine, [
+        sessao("2026-10-10T15:00:00Z", conta("Juarez Fictício", "(11) 90000-0041", pedido("Parmegiana", 80.0))),
+        sessao("2026-10-10T16:00:00Z", conta("Mesa 4", "(11) 90000-0042", pedido("Picanha", 90.0))),
+        sessao("2026-10-10T17:00:00Z", conta("Carla Outra", "(11) 90000-0003", pedido("Risoto", 70.0))),
+        sessao("2026-10-10T18:00:00Z", conta("Ifood Fictício", "(11) 90000-0043", pedido("Burger", 40.0)),
+               delivery=True, canal="IFOOD"),
+    ], dia, dia)
+    historico.gravar(engine, [sessao("2026-10-11T15:00:00Z", conta("", "(11) 90000-0041", pedido("Picanha", 90.0)))],
+                     date(2026, 10, 11), date(2026, 10, 11))
+    html = c.get("/clientes?topo=todos").get_data(as_text=True)
+    assert "6 de 6 clientes (4 do Clube)" in html
+    assert "Juarez Fictício" in html and "(11) 90000-0041" in html and "11/10/2026" in html
+    assert "Mesa 4" not in html and "(11) 90000-0042" in html and "90000-0043" not in html
+    assert html.count("(11) 90000-0003") == 1  # quem está no Clube não repete
+    html = c.get("/clientes?busca=juarez").get_data(as_text=True)
+    assert "1 de 6 clientes" in html and "<strong>2</strong>" in html
+
+
+def test_sem_clube_mostra_os_das_comandas():
+    from posvenda import historico
+    from posvenda.takeat import TakeatForbidden
+    from tests.dados import conta, pedido, sessao
+
+    def proibido():
+        raise TakeatForbidden("sem escopo")
+    c, engine = _app(proibido)
+    historico.gravar(engine, [sessao("2026-10-10T15:00:00Z", conta("Juarez Fictício", "(11) 90000-0041",
+                                                                   pedido("Parmegiana", 80.0)))],
+                     date(2026, 10, 10), date(2026, 10, 10))
+    html = c.get("/clientes").get_data(as_text=True)
+    assert "clube:read" in html and "Mostrando só os clientes das comandas" in html and "Juarez Fictício" in html
