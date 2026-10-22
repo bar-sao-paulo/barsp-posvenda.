@@ -116,6 +116,19 @@ historico_blocos = Table(
     Column("carregado_em", DateTime(timezone=True), nullable=False),
 )
 
+# Mensagens avulsas mandadas pela aba Clientes (promoção, cupom...). Separadas das mensagens da pesquisa:
+# saem pelo WhatsApp de quem clicou (link wa.me) e a resposta do cliente chega lá, não no webhook do pós-venda.
+mensagens_clientes = Table(
+    "mensagens_clientes", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("chave", String(20), nullable=False, index=True),  # DDD + 8 últimos dígitos
+    Column("telefone", String(20), nullable=False),
+    Column("nome", String(200), nullable=False, default=""),
+    Column("texto", Text, nullable=False),
+    Column("enviado_em", DateTime(timezone=True), nullable=False),
+    Column("usuario", String(60), nullable=False, default=""),
+)
+
 # Trava das rotinas automáticas (ex.: "envio:2026-10-02"), para não rodar duas vezes.
 rotinas = Table(
     "rotinas", metadata,

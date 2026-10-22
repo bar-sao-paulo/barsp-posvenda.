@@ -12,7 +12,14 @@ import threading
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
+
+from sqlalchemy import insert, select
+from sqlalchemy.engine import Engine
+
+from . import lista as _lista
+from .db import mensagens_clientes
 
 VALIDADE = 3600  # segundos
 
@@ -90,3 +97,37 @@ def planilha_csv(lista: list[Cliente]) -> str:
     for i, c in enumerate(lista, 1):
         w.writerow([i, c.nome, c.telefone, c.pedidos, f"{c.total_gasto:.2f}".replace(".", ","), c.favorito])
     return saida.getvalue()
+
+
+# --------------------------------------------------------------------------- mensagens avulsas (separadas da pesquisa)
+def registrar_mensagem(engine: Engine, telefone: str, nome: str, texto: str, usuario: str = "",
+                       agora: datetime | None = None) -> None:
+    """Guarda a mensagem que a equipe abriu no WhatsApp para um cliente da aba Clientes."""
+    tel = re.sub(r"\D", "", telefone or "")
+    texto = (texto or "").strip()
+    if not 10 <= len(tel) <= 13 or not texto:
+        raise ValueError("Telefone ou mensagem inválidos.")
+    with engine.begin() as con:
+        con.execute(insert(mensagens_clientes).values(
+            chave=_lista.chave_telefone(tel), telefone=tel, nome=(nome or "").strip()[:200], texto=texto[:4000],
+            enviado_em=agora or datetime.now(timezone.utc), usuario=(usuario or "")[:60]))
+
+
+def mensagens_por_cliente(engine: Engine, telefones: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """chave do telefone -> mensagens já mandadas pela aba Clientes, da mais nova para a mais antiga."""
+    chaves = {_lista.chave_telefone(t) for t in telefones if t}
+    if not chaves:
+        return {}
+    saida: dict[str, list[dict[str, Any]]] = {}
+    with engine.connect() as con:
+        for r in con.execute(select(mensagens_clientes).where(mensagens_clientes.c.chave.in_(chaves))
+                             .order_by(mensagens_clientes.c.enviado_em.desc(), mensagens_clientes.c.id.desc())):
+            saida.setdefault(r.chave, []).append(dict(r._mapping))
+    return saida
+
+
+def ultimas_mensagens(engine: Engine, limite: int = 30) -> list[dict[str, Any]]:
+    with engine.connect() as con:
+        return [dict(r._mapping) for r in con.execute(
+            select(mensagens_clientes).order_by(mensagens_clientes.c.enviado_em.desc(), mensagens_clientes.c.id.desc())
+            .limit(limite))]

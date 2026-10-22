@@ -103,3 +103,21 @@ def test_chave_sem_permissao_do_clube_explica_o_que_fazer():
         raise TakeatForbidden("Sem permissão", 403)
     c, _ = _app(sem_escopo)
     assert "clube:read" in c.get("/clientes").get_data(as_text=True)
+
+
+def test_mensagens_da_aba_clientes_ficam_separadas_da_pesquisa():
+    from posvenda.db import mensagens
+    from sqlalchemy import select, func
+    c, engine = _app(lambda: CLUBE)
+    with c.session_transaction() as s:
+        csrf = s["csrf"]
+    r = c.post("/clientes/mensagem", data={"csrf": csrf, "telefone": "5511900000003", "nome": "Carla Fictícia",
+                                           "texto": "Oi, Carla! Temos novidade."})
+    assert r.get_json() == {"ok": True}
+    assert c.post("/clientes/mensagem", data={"csrf": csrf, "telefone": "12", "texto": "x"}).status_code == 400
+    assert c.post("/clientes/mensagem", data={"telefone": "5511900000003", "texto": "x"}).status_code == 400  # sem CSRF
+    html = c.get("/clientes?topo=todos").get_data(as_text=True)
+    assert "✉ 1" in html and "Oi, Carla! Temos novidade." in html and "Mensagens enviadas pela aba Clientes" in html
+    assert 'data-completo="Carla Fictícia"' in html
+    with engine.connect() as con:  # nada vai para as mensagens da pesquisa
+        assert con.execute(select(func.count()).select_from(mensagens)).scalar() == 0
