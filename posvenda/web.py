@@ -5,6 +5,8 @@ Variáveis: DATABASE_URL, TAKEAT_API_KEY, TAKEAT_BASE_URL (opcional), SECRET_KEY
 Etapa 2 (opcionais): WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN,
 WHATSAPP_API_VERSION, WHATSAPP_WABA_ID, WHATSAPP_MODELO_A/B/C, ANTHROPIC_API_KEY, ENVIO_AUTOMATICO, ENVIO_HORA, RESPOSTA_AUTOMATICA,
 ALERTA_EMAIL, RESEND_API_KEY, EMAIL_FROM, PAINEL_URL.
+Aba Google (opcionais): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_LOCAL,
+GOOGLE_CONTATO, GOOGLE_RESPOSTA_AUTOMATICA.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from jinja2 import DictLoader
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import automacao, clientes, historico, lista, respostas, servico
+from . import automacao, avaliacoes, clientes, historico, lista, respostas, servico
 from .db import criar_engine
 from .takeat import TakeatClient, TakeatError, TakeatForbidden
 from .whatsapp import WhatsApp, WhatsAppErro, assinatura_valida, ler_webhook
@@ -74,13 +76,35 @@ def _alerta():
     return automacao.alerta_por_email(destino, chave, remetente, os.environ.get("PAINEL_URL", ""))
 
 
+def _perfil_google():
+    ids = [os.environ.get(x, "") for x in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN")]
+    if not all(ids):
+        return None
+    from .google_perfil import PerfilGoogle
+    return PerfilGoogle(*ids, local=os.environ.get("GOOGLE_LOCAL", ""))
+
+
+def _respondedor_google():
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    return avaliacoes.Respondedor(contato=os.environ.get("GOOGLE_CONTATO", ""))
+
+
+def _alerta_google():
+    destino, chave, remetente = (os.environ.get(x) for x in ("ALERTA_EMAIL", "RESEND_API_KEY", "EMAIL_FROM"))
+    if not (destino and chave and remetente):
+        return None
+    return avaliacoes.alerta_por_email(destino, chave, remetente, os.environ.get("PAINEL_URL", ""))
+
+
 _PADRAO = object()
 
 
 def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senha: str | None = None,
               hoje=servico.hoje_local, whatsapp=_PADRAO, classificar=_PADRAO, app_secret: str | None = None,
               verify_token: str | None = None, config: automacao.Config | None = None,
-              agendador: bool | None = None, buscar_clientes=_PADRAO) -> Flask:
+              agendador: bool | None = None, buscar_clientes=_PADRAO, google=_PADRAO,
+              responder_google=_PADRAO) -> Flask:
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     chave = os.environ.get("SECRET_KEY")
@@ -110,10 +134,13 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
     segredo_app = app_secret if app_secret is not None else os.environ.get("WHATSAPP_APP_SECRET", "")
     token_verificacao = verify_token if verify_token is not None else os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
     cfg = config or automacao.Config.do_ambiente()
+    perfil = _perfil_google() if google is _PADRAO else google
+    respondedor = _respondedor_google() if responder_google is _PADRAO else responder_google
     # O agendador só liga no Railway (criar_app() sem argumentos); nos testes fica desligado.
     if agendador if agendador is not None else producao:
         automacao.iniciar_agendador(engine, cfg, buscar=buscar, whatsapp=wa, classificar=classificador,
-                                    alertar=_alerta(), transcrever=_transcritor())
+                                    alertar=_alerta(), transcrever=_transcritor(), google=perfil,
+                                    responder_google=respondedor, alertar_google=_alerta_google())
     app.config["POSVENDA_CFG"] = cfg
 
     def _bloquear(telefone: str) -> None:
@@ -500,6 +527,77 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
         return Response(corpo, mimetype="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename=pos-venda-{nome}.csv"})
 
+    # ----------------------------------------------------------------------- avaliações do Google
+    @app.get("/google")
+    def google_pagina():
+        filtro = request.args.get("filtro", "revisar")
+        if filtro not in avaliacoes.FILTROS:
+            filtro = "revisar"
+        rows = avaliacoes.listar(engine, filtro)
+        for r in rows:
+            q = r.get("criada_em")
+            r["quando"] = avaliacoes._utc(q).astimezone(lista.TZ).strftime("%d/%m/%Y %H:%M") if q else ""
+            p = r.get("publicada_em")
+            r["quando_publicada"] = avaliacoes._utc(p).astimezone(lista.TZ).strftime("%d/%m %H:%M") if p else ""
+        ultima = automacao.ultima_rotina(engine, "google:leitura:")
+        if ultima:
+            ultima["quando"] = avaliacoes._utc(ultima["rodou_em"]).astimezone(lista.TZ).strftime("%d/%m %H:%M")
+        hoje_ = hoje()
+        cont = avaliacoes.contagem(engine)
+        return render_template("google.html", rows=rows, filtro=filtro, FILTROS=avaliacoes.FILTROS, A=avaliacoes,
+                               contas={k: sum(cont.get(x, 0) for x in sit)
+                                       for k, (_, sit) in avaliacoes.FILTROS.items() if sit},
+                               ultima=ultima, google_ok=perfil is not None,
+                               ia_ok=respondedor is not None, automatica=cfg.google_automatica,
+                               mes=avaliacoes.resumo_do_mes(engine, hoje_.year, hoje_.month),
+                               nome_do_mes=respostas.nome_do_mes(hoje_.year, hoje_.month))
+
+    def _volta_google(av_id: int):
+        return redirect(url_for("google_pagina", filtro=request.form.get("filtro", "revisar")) + f"#g{av_id}")
+
+    @app.post("/google/atualizar")
+    def google_atualizar():
+        if perfil is None:
+            flash("Google não configurado no Railway (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN).")
+            return redirect(url_for("google_pagina"))
+        try:
+            res = automacao.ler_google(engine, perfil)
+            r2 = avaliacoes.responder_pendentes(engine, respondedor, responder_google=perfil.responder,
+                                                automatica=cfg.google_automatica, alertar=_alerta_google())
+            flash(f"Google lido: {res.resumo}. {r2.publicadas} resposta(s) publicada(s), "
+                  f"{r2.para_revisar} para revisar.")
+        except Exception as exc:  # GoogleErro e falhas de rede: mostra na tela
+            flash(f"Não consegui ler o Google: {exc}")
+        return redirect(url_for("google_pagina", filtro=request.form.get("filtro", "revisar")))
+
+    @app.post("/google/<int:av_id>/publicar")
+    def google_publicar(av_id: int):
+        if perfil is None:
+            flash("Google não configurado no Railway.")
+        else:
+            try:
+                avaliacoes.publicar_a_mao(engine, av_id, request.form.get("texto", ""), perfil.responder, g.usuario)
+                flash("Resposta publicada no Google.")
+            except avaliacoes.AvaliacaoErro as exc:
+                flash(str(exc))
+        return _volta_google(av_id)
+
+    @app.post("/google/<int:av_id>/sugerir")
+    def google_sugerir(av_id: int):
+        avaliacoes.pedir_sugestao(engine, av_id)
+        if respondedor is None:
+            flash("ANTHROPIC_API_KEY não configurada no Railway.")
+        else:
+            avaliacoes.responder_pendentes(engine, respondedor, responder_google=None, automatica=False,
+                                           alertar=None, somente=[av_id])
+            flash("Sugestão pronta. Ela não sai sozinha: confira e publique.")
+        return redirect(url_for("google_pagina", filtro="revisar") + f"#g{av_id}")
+
+    @app.post("/google/<int:av_id>/ignorar")
+    def google_ignorar(av_id: int):
+        avaliacoes.ignorar(engine, av_id)
+        return _volta_google(av_id)
+
     # ----------------------------------------------------------------------- número do WhatsApp (registro)
     @app.route("/whatsapp", methods=["GET", "POST"])
     def whatsapp_numero():
@@ -549,6 +647,49 @@ _STATUS_NUMERO = {
 }
 
 
+GOOGLE_HTML = """{% extends 'base.html' %}{% block corpo %}
+<div class="topo-resp"><div><h2 style="margin:0 0 4px">Avaliações do Google</h2>
+<p class="quieto" style="margin:0">Elogios (4 e 5 estrelas) {{ 'são respondidos sozinhos' if automatica else 'ficam como sugestão (resposta automática desligada)' }}.
+Reclamações (1 a 3 estrelas) esperam você aqui. Nunca cupom, desconto ou brinde.</p></div>
+<div class="nps"><div class="quieto">{{ nome_do_mes }}</div>
+<div class="nps-valor">{{ mes.media|string|replace('.', ',') if mes.media is not none else '–' }}{% if mes.media is not none %} <span style="font-size:18px">★</span>{% endif %}</div>
+<div class="quieto">{{ mes.avaliacoes }} avaliação(ões) · {{ mes.publicadas }} respondida(s) pelo painel</div></div></div>
+
+<div class="card" style="margin-top:14px">
+{% if not google_ok %}<p class="erro" style="margin:0 0 8px"><b>Google não configurado.</b> Faltam no Railway: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_REFRESH_TOKEN.</p>
+{% else %}<p style="margin:0 0 8px">Leitura a cada 30 minutos.
+{% if ultima %} Última: {{ ultima.quando }} · {% if ultima.resultado.startswith('erro') %}<span class="erro">{{ ultima.resultado }}</span>{% else %}{{ ultima.resultado or 'lendo…' }}{% endif %}{% else %} Ainda não leu.{% endif %}</p>{% endif %}
+{% if not ia_ok %}<p class="erro" style="margin:0 0 8px">ANTHROPIC_API_KEY não configurada: sem respostas sugeridas.</p>{% endif %}
+<div class="linha">{% for k, (rotulo, sit) in FILTROS.items() %}
+<a class="btn {{ '' if k == filtro else 'btn2' }}" href="{{ url_for('google_pagina', filtro=k) }}">{{ rotulo }}{% if k in contas %} ({{ contas[k] }}){% endif %}</a>{% endfor %}
+<form method="post" action="{{ url_for('google_atualizar') }}" style="margin:0"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="filtro" value="{{ filtro }}"><button class="btn2">Ler o Google agora</button></form></div></div>
+
+{% for r in rows %}
+<div class="card cli {{ 'critico' if 0 < r.estrelas <= 2 else 'atencao' if r.estrelas == 3 or r.estrelas == 0 else 'positivo' }}" id="g{{ r.id }}">
+<div class="topo"><span class="resumo">{{ r.autor or 'Anônimo' }}</span>
+<span style="color:#d9a400;letter-spacing:1px">{{ '★' * r.estrelas }}<span style="color:#ccc">{{ '★' * (5 - r.estrelas) if r.estrelas else '' }}</span></span>
+<span class="tag">{{ r.situacao }}</span><span class="quieto">{{ r.quando }}</span></div>
+<div class="fala">{{ r.comentario or '(só estrelas, sem comentário)' }}</div>
+{% if r.motivo_revisao and r.situacao in (A.REVISAR, A.AGUARDANDO) %}<p class="erro" style="margin:0">⚠ {{ r.motivo_revisao }}</p>{% endif %}
+{% if r.erro and r.situacao != A.PUBLICADA %}<p class="erro" style="margin:0">Erro do Google: {{ r.erro }}</p>{% endif %}
+{% if r.situacao in (A.PUBLICADA, A.JA_RESPONDIDA) %}
+<div><span class="quieto">Resposta no Google{% if r.situacao == A.PUBLICADA %} · publicada {{ r.quando_publicada }} ({{ r.publicada_por }}){% endif %}:</span>
+<div class="fala" style="background:#eef6f1">{{ r.resposta_google }}</div></div>
+{% elif r.situacao == A.AGUARDANDO %}<p class="quieto" style="margin:0">A resposta sai em instantes (recarregue a página).</p>
+{% elif r.situacao == A.REVISAR %}
+<form method="post" action="{{ url_for('google_publicar', av_id=r.id) }}" class="cli"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="filtro" value="{{ filtro }}">
+<textarea name="texto">{{ r.resposta_sugerida }}</textarea>
+<div class="linha"><button {{ 'disabled' if not google_ok }}>Publicar no Google</button></div></form>
+<form method="post" action="{{ url_for('google_ignorar', av_id=r.id) }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="filtro" value="{{ filtro }}"><button class="btn2 mini">Não responder</button></form>
+{% elif r.situacao in (A.ANTIGA, A.IGNORADA) %}
+<div class="linha"><form method="post" action="{{ url_for('google_sugerir', av_id=r.id) }}" style="margin:0"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sugerir resposta</button></form>
+{% if r.situacao == A.ANTIGA %}<form method="post" action="{{ url_for('google_ignorar', av_id=r.id) }}" style="margin:0"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><input type="hidden" name="filtro" value="{{ filtro }}"><button class="btn2 mini">Não responder</button></form>{% endif %}</div>
+{% endif %}
+</div>
+{% else %}<p class="quieto">Nada aqui{% if filtro == 'revisar' %}: nenhuma avaliação esperando você{% endif %}.</p>{% endfor %}
+{% endblock %}"""
+
+
 TEMPLATES = {
     "base.html": """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Pós-venda · Bar São Paulo</title>
@@ -578,7 +719,7 @@ select{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;bac
 .filtros{display:grid;gap:8px}.nps{border:1px solid var(--bd);border-radius:10px;padding:10px 14px;min-width:220px;max-width:320px}
 .nps-valor{font-size:34px;font-weight:700;line-height:1.1}.positivo-tx{color:var(--ac)}.atencao-tx{color:#a37b00}
 </style></head><body>
-{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('clientes_pagina') }}">Clientes</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a></nav>
+{% if g.usuario %}<header><nav><a href="{{ url_for('envio') }}">Envio</a><a href="{{ url_for('respostas_pagina') }}">Respostas</a><a href="{{ url_for('clientes_pagina') }}">Clientes</a><a href="{{ url_for('nao_enviar') }}">Não enviar</a><a href="{{ url_for('whatsapp_numero') }}">WhatsApp</a><a href="{{ url_for('google_pagina') }}">Google</a></nav>
 <form method="post" action="{{ url_for('sair') }}"><input type="hidden" name="csrf" value="{{ session['csrf'] }}"><button class="btn2">Sair</button></form></header>{% endif %}
 <main>{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block corpo %}{% endblock %}</main>
 <script>
@@ -592,6 +733,8 @@ function verTelefone(b, id) {
   });
 }
 </script></body></html>""",
+
+    "google.html": GOOGLE_HTML,
 
     "entrar.html": """{% extends 'base.html' %}{% block corpo %}<div class="card" style="max-width:380px;margin:40px auto">
 <h2 style="margin-top:0">Pós-venda · Bar São Paulo</h2><form method="post"><input type="hidden" name="csrf" value="{{ session['csrf'] }}">
