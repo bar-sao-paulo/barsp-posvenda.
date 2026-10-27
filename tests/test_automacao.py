@@ -423,7 +423,9 @@ def test_pagina_respostas_e_envio_manual(app_wa, engine):
 def test_privacidade_e_publica(app_wa):
     app, _ = app_wa
     r = app.test_client().get("/privacidade")
-    assert r.status_code == 200 and "PARAR" in r.get_data(as_text=True)
+    texto = r.get_data(as_text=True)
+    assert r.status_code == 200 and "PARAR" in texto
+    assert "Avaliações do Google" in texto and "uso limitado" in texto  # exigido na tela de consentimento do Google
 
 
 def test_pagina_do_numero_mostra_situacao_e_registra(app_wa):

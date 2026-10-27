@@ -842,8 +842,10 @@ function abrir(id, tel) {
 {% endblock %}""",
 
     "privacidade.html": """{% extends 'base.html' %}{% block corpo %}<div class="card">
-<h2 style="margin-top:0">Política de privacidade da pesquisa de satisfação</h2>
-<p>Bar São Paulo (CNPJ 54.615.219/0001-24).</p>
+<h2 style="margin-top:0">Política de privacidade do pós-venda</h2>
+<p>Bar São Paulo (CNPJ 54.615.219/0001-24). Esta página vale para a pesquisa de satisfação pelo WhatsApp e para as
+respostas às avaliações do Google.</p>
+<h3>Pesquisa de satisfação pelo WhatsApp</h3>
 <p><b>O que usamos.</b> Depois da sua visita ou do seu pedido no delivery, usamos o primeiro nome, o telefone e o prato
 registrados no nosso sistema de vendas para mandar uma pesquisa de satisfação pelo WhatsApp. Guardamos a sua resposta
 para melhorar o atendimento.</p>
@@ -856,6 +858,19 @@ respostas mais importantes.</p>
 painel de pós-venda enquanto forem úteis para o atendimento.</p>
 <p><b>Não quer receber?</b> Responda PARAR na conversa e você não recebe mais. Para pedir que apaguemos seus dados ou
 tirar dúvidas, fale com a gente pelo mesmo WhatsApp.</p>
+<h3>Avaliações do Google</h3>
+<p><b>O que usamos.</b> Quando você avalia o Bar São Paulo no Google, lemos a avaliação pública (nome exibido, estrelas
+e comentário) pelo acesso oficial do Google ao nosso próprio Perfil da Empresa, para responder em nome do bar.</p>
+<p><b>Quem mais vê.</b> O comentário é lido por uma ferramenta de inteligência artificial (Claude, da Anthropic) para
+sugerir a resposta. Elogios podem ser respondidos automaticamente; reclamações são revisadas por uma pessoa da nossa
+equipe antes de publicar. A resposta fica pública no Google, como qualquer resposta do proprietário.</p>
+<p><b>O que não fazemos.</b> Só acessamos o Perfil da Empresa do próprio bar. Não juntamos a avaliação com o seu
+telefone ou com os seus pedidos, não usamos para propaganda e não vendemos nem cedemos esses dados. O uso de dados
+recebidos das APIs do Google segue a Política de Dados do Usuário dos Serviços de API do Google, incluindo os
+requisitos de uso limitado.</p>
+<p><b>Por quanto tempo.</b> A cópia da avaliação e da resposta fica no servidor do painel de pós-venda enquanto for útil
+para o atendimento. Se você mudar a avaliação no Google, a nossa cópia é atualizada. Para pedir que apaguemos a cópia,
+fale com a gente pelo WhatsApp do bar.</p>
 </div>{% endblock %}""",
 
     "whatsapp.html": """{% extends 'base.html' %}{% block corpo %}<div class="card"><h3 style="margin-top:0">Número do WhatsApp</h3>
