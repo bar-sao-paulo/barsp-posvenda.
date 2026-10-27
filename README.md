@@ -33,6 +33,21 @@ O telefone completo só aparece no link do WhatsApp e no CSV; na tela fica masca
   "Revisar antes de enviar" e avisa por e-mail. Com `RESPOSTA_AUTOMATICA=1`, só as sem alerta saem sozinhas.
   O WhatsApp só aceita texto livre até 24 h depois da última mensagem do cliente.
 
+## Aba Google: respostas às avaliações
+
+A cada 30 minutos o painel lê as avaliações do Perfil da Empresa no Google e o Claude escreve a resposta:
+agradecimento nos elogios e pedido de desculpas, com convite para o privado, nas reclamações. Nunca cupom,
+desconto, brinde ou cortesia (a trava vale também para quem publica pela tela).
+
+- **4 e 5 estrelas** sem nenhum alerta são publicadas sozinhas no Google.
+- **1 a 3 estrelas**, avaliação sem estrelas, assunto grave (intoxicação, bicho, discriminação, briga, cobrança
+  indevida…) ou texto que bate em alguma trava ficam em "Para revisar" e avisam por e-mail.
+- Só as avaliações que chegam depois de ligar são respondidas. As antigas aparecem em "Antigas sem resposta",
+  com o botão "Sugerir resposta" (essa sugestão nunca sai sozinha).
+- Respondeu direto no Google? O painel vê na próxima leitura e não mexe mais.
+
+O Google só libera a API do Perfil da Empresa depois de um pedido de acesso. Até lá a tela mostra "Cota zerada".
+
 ## Railway
 
 Serviço web: `railway.json` → `gunicorn 'posvenda.web:criar_app()'`, verificação em `/saude`.
@@ -55,6 +70,11 @@ Variáveis (só nomes; os valores ficam no Railway):
 | `ENVIO_AUTOMATICO`, `ENVIO_HORA` | `1` liga o envio diário; hora de São Paulo (padrão 11) |
 | `RESPOSTA_AUTOMATICA` | `1` deixa sair sozinha a resposta sem nenhum alerta (🔴 nunca sai) |
 | `ALERTA_EMAIL`, `RESEND_API_KEY`, `EMAIL_FROM`, `PAINEL_URL` | Opcionais; aviso por e-mail de crítica |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Cliente OAuth (tipo "Aplicativo da Web") do projeto no Google Cloud |
+| `GOOGLE_REFRESH_TOKEN` | Autorização da conta dona do Perfil da Empresa, escopo `https://www.googleapis.com/auth/business.manage` |
+| `GOOGLE_LOCAL` | Opcional; `accounts/…/locations/…`. Sem ele, o painel usa o único local da conta |
+| `GOOGLE_CONTATO` | Opcional; canal para reclamações citado na resposta (ex.: "WhatsApp (15) 9xxxx-xxxx") |
+| `GOOGLE_RESPOSTA_AUTOMATICA` | `0` deixa tudo como sugestão; padrão ligado (elogios 4 e 5 estrelas saem sozinhos) |
 | `PAINEL_API_TOKEN` | Opcional; texto aleatório longo que libera `GET /api/resumo` (só números, sem dados de cliente) para o painel financeiro |
 
 ## Testes

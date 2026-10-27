@@ -138,6 +138,30 @@ mensagens_clientes = Table(
     Column("usuario", String(60), nullable=False, default=""),
 )
 
+# Avaliações do Google (aba Google): o que o cliente escreveu (é público no Google), a resposta sugerida pelo
+# Claude e o que foi publicado. Sem telefone nem nenhum dado do Takeat.
+avaliacoes_google = Table(
+    "avaliacoes_google", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("review_id", String(200), nullable=False, unique=True),
+    Column("nome", String(400), nullable=False),  # "accounts/.../locations/.../reviews/..." (usado para responder)
+    Column("autor", String(200), nullable=False, default=""),
+    Column("estrelas", Integer, nullable=False, default=0),  # 0 = o Google não informou
+    Column("comentario", Text, nullable=False, default=""),
+    Column("criada_em", DateTime(timezone=True)),
+    Column("atualizada_em", DateTime(timezone=True)),
+    Column("resposta_google", Text, nullable=False, default=""),  # o que está publicado no Google hoje
+    Column("resposta_sugerida", Text, nullable=False, default=""),
+    Column("situacao", String(40), nullable=False),
+    Column("motivo_revisao", String(300), nullable=False, default=""),
+    Column("so_sugerir", Boolean, nullable=False, default=False),  # antiga pedida na aba: nunca publica sozinha
+    Column("vista_em", DateTime(timezone=True), nullable=False),
+    Column("publicada_em", DateTime(timezone=True)),
+    Column("publicada_por", String(60), nullable=False, default=""),
+    Column("alerta_em", DateTime(timezone=True)),
+    Column("erro", String(300)),
+)
+
 # Trava das rotinas automáticas (ex.: "envio:2026-10-02"), para não rodar duas vezes.
 rotinas = Table(
     "rotinas", metadata,

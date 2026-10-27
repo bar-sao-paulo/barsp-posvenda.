@@ -7,6 +7,7 @@ A cada minuto:
   responde sozinho só as que não precisam de revisão.
 - Transcreve os áudios dos clientes (com OPENAI_API_KEY), antes da análise.
 - Lê aos poucos o histórico de comandas dos últimos 12 meses (número de compras de cada cliente).
+- A cada 30 minutos lê as avaliações do Google; responde as novas e publica sozinho os elogios (aba Google).
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from . import historico, lista, respostas, servico
+from . import avaliacoes, historico, lista, respostas, servico
 from .db import envios, rotinas
 from .whatsapp import WhatsAppErro
 
@@ -178,6 +179,38 @@ def transcrever_audios(engine: Engine, baixar: Callable[[str], tuple[bytes, str]
     return feitos
 
 
+# --------------------------------------------------------------------------- avaliações do Google
+GOOGLE_INTERVALO_MIN = 30
+
+
+def chave_leitura_google(agora: datetime) -> str:
+    local = agora.astimezone(lista.TZ)
+    bloco = local.minute // GOOGLE_INTERVALO_MIN * GOOGLE_INTERVALO_MIN
+    return f"google:leitura:{local:%Y-%m-%dT%H}:{bloco:02d}"
+
+
+def ler_google(engine: Engine, perfil, agora: datetime | None = None, *, paginas: int = 4) -> avaliacoes.ResultadoLeitura:
+    """Lê as avaliações no Google e grava no banco. Erro do Google sobe para quem chamou."""
+    return avaliacoes.sincronizar(engine, perfil.avaliacoes(paginas=paginas), agora=agora)
+
+
+def rotina_google(engine: Engine, perfil, responder, *, automatica: bool, alertar=None,
+                  agora: datetime | None = None) -> None:
+    """A cada 30 minutos lê o Google; a cada minuto responde o que estiver aguardando."""
+    agora = agora or servico.agora()
+    chave = chave_leitura_google(agora)
+    if travar(engine, chave):
+        try:
+            res = ler_google(engine, perfil, agora)
+            registrar(engine, chave, res.resumo)
+        except Exception as exc:
+            log.warning("Leitura das avaliações do Google falhou: %s", exc)
+            registrar(engine, chave, f"erro: {exc}")
+            return
+    avaliacoes.responder_pendentes(engine, responder, responder_google=perfil.responder, automatica=automatica,
+                                   alertar=alertar, agora=agora)
+
+
 # --------------------------------------------------------------------------- agendador
 @dataclass
 class Config:
@@ -185,6 +218,9 @@ class Config:
     resposta_automatica: bool = False
     hora: int = ENVIO_HORA_PADRAO
     modelos: dict[str, str] = field(default_factory=lambda: dict(MODELOS_PADRAO))
+    # Aba Google: pedido do Emerson em 27/10/2026 (elogios 4 e 5 estrelas saem sozinhos). GOOGLE_RESPOSTA_AUTOMATICA=0
+    # desliga e deixa tudo como sugestão.
+    google_automatica: bool = True
 
     @classmethod
     def do_ambiente(cls) -> "Config":
@@ -195,14 +231,22 @@ class Config:
         return cls(
             envio_automatico=os.environ.get("ENVIO_AUTOMATICO") == "1",
             resposta_automatica=os.environ.get("RESPOSTA_AUTOMATICA") == "1",
+            google_automatica=os.environ.get("GOOGLE_RESPOSTA_AUTOMATICA", "1") != "0",
             hora=hora,
             modelos={v: os.environ.get(f"WHATSAPP_MODELO_{v}", padrao) for v, padrao in MODELOS_PADRAO.items()},
         )
 
 
 def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, classificar=None, alertar=None,
-                  transcrever=None, agora: datetime | None = None) -> None:
+                  transcrever=None, google=None, responder_google=None, alertar_google=None,
+                  agora: datetime | None = None) -> None:
     agora = agora or servico.agora()
+    if google is not None:
+        try:
+            rotina_google(engine, google, responder_google, automatica=cfg.google_automatica,
+                          alertar=alertar_google, agora=agora)
+        except Exception:
+            log.exception("Rotina das avaliações do Google falhou")
     if cfg.envio_automatico and buscar is not None and whatsapp is not None:
         try:
             envio_do_dia(engine, agora.astimezone(lista.TZ), buscar, whatsapp.enviar_modelo, hora=cfg.hora,
@@ -254,6 +298,7 @@ def iniciar_agendador(engine: Engine, cfg: Config, **deps) -> threading.Thread:
 
     t = threading.Thread(target=laco, name="posvenda-agendador", daemon=True)
     t.start()
-    log.info("Agendador do pós-venda ligado (envio automático: %s, resposta automática: %s, %sh).",
-             cfg.envio_automatico, cfg.resposta_automatica, cfg.hora)
+    log.info("Agendador do pós-venda ligado (envio automático: %s, resposta automática: %s, %sh, Google: %s).",
+             cfg.envio_automatico, cfg.resposta_automatica, cfg.hora,
+             "ligado" if deps.get("google") is not None else "sem credenciais")
     return t

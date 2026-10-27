@@ -31,6 +31,16 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - O Claude sugere nota/resumo/resposta/ação (`ia.py`); as travas (gravidade, revisão, vocabulário proibido,
   compensação, emojis, janela de 24 h) ficam no código (`respostas.py`), não no modelo.
 
+## Aba Google (avaliações do Perfil da Empresa, Emerson, 27/10/2026)
+- Elogio: agradecer. Reclamação: pedir desculpas e convidar para o privado. **Nunca** cupom, desconto, brinde,
+  cortesia, reembolso ou nada grátis: trava `_COMPENSACAO` em `avaliacoes.py`, vale também na publicação manual.
+- 4 e 5 estrelas sem alerta saem sozinhas (`GOOGLE_RESPOSTA_AUTOMATICA`, ligada por padrão a pedido do Emerson;
+  `=0` desliga). 1 a 3 estrelas, sem estrelas, assunto grave (`_GRAVE`), pedido de dono pela IA ou qualquer trava
+  ficam em "Revisar antes de publicar" e avisam por e-mail.
+- Só as novas: avaliações criadas antes da primeira leitura (`rotinas` chave `google:inicio`) ficam "Antiga"; a
+  sugestão pedida para uma antiga nunca sai sozinha (`so_sugerir`). Respondida direto no Google = "Já respondida".
+- Leitura a cada 30 min (trava `google:leitura:<data>T<hora>:<00|30>`); resposta a cada minuto do agendador.
+
 ## Mapa do código (`posvenda/`)
 | Arquivo | Papel |
 |---|---|
@@ -46,7 +56,9 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 | `transcricao.py` | Transcrição dos áudios (OpenAI `audio/transcriptions`, liga com `OPENAI_API_KEY`; modelo em `TRANSCRICAO_MODELO`) |
 | `automacao.py` | Envio automático do dia (trava em `rotinas`), aviso de crítica por e-mail, leitura do histórico, agendador (thread) |
 | `api_resumo.py` | `GET /api/resumo` (só leitura, `Authorization: Bearer PAINEL_API_TOKEN`): números do pós-venda por mês (enviadas, respostas, nota média, gravidades), sem nenhum dado de cliente, para o painel financeiro |
-| `web.py` | Painel Flask: login, Envio, Respostas (por dia ou mês, com o NPS do mês: % de 9–10 − % de 0–6, notas estimadas entram), Não enviar, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
+| `google_perfil.py` | API do Perfil da Empresa no Google: token pelo `GOOGLE_REFRESH_TOKEN` (escopo `business.manage`), local (`GOOGLE_LOCAL` ou o único da conta), `reviews.list` (v4) e `reviews.updateReply` |
+| `avaliacoes.py` | Aba Google: tabela `avaliacoes_google`, leitura (novas/antigas/já respondidas), resposta com o Claude (`Respondedor`), travas, publicação e aviso por e-mail |
+| `web.py` | Painel Flask: login, Envio, Respostas (por dia ou mês, com o NPS do mês: % de 9–10 − % de 0–6, notas estimadas entram), Não enviar, Google, WhatsApp (situação e registro do número com PIN, que não é gravado), CSV, webhook `/webhook/whatsapp`, `/saude` |
 
 ## Convenções
 - Datas/horas: fuso `America/Sao_Paulo` (`lista.TZ`); no banco em UTC.
