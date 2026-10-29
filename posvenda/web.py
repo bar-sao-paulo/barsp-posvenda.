@@ -6,7 +6,7 @@ Etapa 2 (opcionais): WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECR
 WHATSAPP_API_VERSION, WHATSAPP_WABA_ID, WHATSAPP_MODELO_A/B/C, ANTHROPIC_API_KEY, ENVIO_AUTOMATICO, ENVIO_HORA, RESPOSTA_AUTOMATICA,
 ALERTA_EMAIL, RESEND_API_KEY, EMAIL_FROM, PAINEL_URL.
 Aba Google (opcionais): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_LOCAL,
-GOOGLE_CONTATO, GOOGLE_RESPOSTA_AUTOMATICA.
+GOOGLE_RESPOSTA_AUTOMATICA.
 """
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _perfil_google():
 def _respondedor_google():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
-    return avaliacoes.Respondedor(contato=os.environ.get("GOOGLE_CONTATO", ""))
+    return avaliacoes.Respondedor()
 
 
 def _alerta_google():

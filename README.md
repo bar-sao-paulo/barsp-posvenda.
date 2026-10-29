@@ -36,7 +36,8 @@ O telefone completo só aparece no link do WhatsApp e no CSV; na tela fica masca
 ## Aba Google: respostas às avaliações
 
 A cada 30 minutos o painel lê as avaliações do Perfil da Empresa no Google e o Claude escreve a resposta:
-agradecimento nos elogios e pedido de desculpas, com convite para o privado, nas reclamações. Nunca cupom,
+agradecimento nos elogios e, nas reclamações, pedido de desculpas terminando com o pedido de uma nova oportunidade
+(nunca pede para o cliente explicar o que houve nem chama no privado). Nunca cupom,
 desconto, brinde ou cortesia (a trava vale também para quem publica pela tela).
 
 - **4 e 5 estrelas** sem nenhum alerta são publicadas sozinhas no Google.
@@ -73,7 +74,6 @@ Variáveis (só nomes; os valores ficam no Railway):
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Cliente OAuth (tipo "Aplicativo da Web") do projeto no Google Cloud |
 | `GOOGLE_REFRESH_TOKEN` | Autorização da conta dona do Perfil da Empresa, escopo `https://www.googleapis.com/auth/business.manage` |
 | `GOOGLE_LOCAL` | Opcional; `accounts/…/locations/…`. Sem ele, o painel usa o único local da conta |
-| `GOOGLE_CONTATO` | Opcional; canal para reclamações citado na resposta (ex.: "WhatsApp (15) 9xxxx-xxxx") |
 | `GOOGLE_RESPOSTA_AUTOMATICA` | `0` deixa tudo como sugestão; padrão ligado (elogios 4 e 5 estrelas saem sozinhos) |
 | `PAINEL_API_TOKEN` | Opcional; texto aleatório longo que libera `GET /api/resumo` (só números, sem dados de cliente) para o painel financeiro |
 
