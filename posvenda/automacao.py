@@ -198,6 +198,9 @@ def rotina_google(engine: Engine, perfil, responder, *, automatica: bool, alerta
                   agora: datetime | None = None) -> None:
     """A cada 30 minutos lê o Google; a cada minuto responde o que estiver aguardando."""
     agora = agora or servico.agora()
+    if responder is not None and travar(engine, "google-refazer-sugestoes:v1"):  # regra de 29/10/2026
+        registrar(engine, "google-refazer-sugestoes:v1",
+                  f"{avaliacoes.refazer_sugestoes(engine)} sugestão(ões) refeita(s): fecho com nova oportunidade")
     chave = chave_leitura_google(agora)
     if travar(engine, chave):
         try:

@@ -32,7 +32,9 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
   compensação, emojis, janela de 24 h) ficam no código (`respostas.py`), não no modelo.
 
 ## Aba Google (avaliações do Perfil da Empresa, Emerson, 27/10/2026)
-- Elogio: agradecer. Reclamação: pedir desculpas e convidar para o privado. **Nunca** cupom, desconto, brinde,
+- Respostas objetivas. Elogio: agradecer. Reclamação: pedir desculpas e a última frase pede uma nova oportunidade
+  (trava `termina_com_nova_oportunidade`); nunca pedir para o cliente explicar nem chamar no privado (trava
+  `_PEDE_EXPLICACAO`) (Emerson, 29/10/2026). **Nunca** cupom, desconto, brinde,
   cortesia, reembolso ou nada grátis: trava `_COMPENSACAO` em `avaliacoes.py`, vale também na publicação manual.
 - 4 e 5 estrelas sem alerta saem sozinhas (`GOOGLE_RESPOSTA_AUTOMATICA`, ligada por padrão a pedido do Emerson;
   `=0` desliga). 1 a 3 estrelas, sem estrelas, assunto grave (`_GRAVE`), pedido de dono pela IA ou qualquer trava

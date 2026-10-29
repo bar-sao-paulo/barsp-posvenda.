@@ -353,3 +353,47 @@ def test_tela_sem_google_configurado(engine):
         csrf = s["csrf"]
     c.post("/entrar", data={"usuario": "thais", "senha": "senha-ficticia", "csrf": csrf})
     assert "Google não configurado" in c.get("/google").get_data(as_text=True)
+
+
+# --------------------------------------------------------------------------- regra de 29/10/2026
+@pytest.mark.parametrize("texto", [
+    "Obrigado pelo retorno, Ana. Queremos entender melhor o que aconteceu, fique à vontade para nos contar mais.",
+    "Valeu! Se puder, conte mais detalhes sobre a sua visita.",
+    "Desculpa pela demora. Fala com a gente no privado.",
+    "Obrigado! Nos chame no direct.",
+])
+def test_nunca_pede_para_explicar(texto):
+    assert "pede para o cliente explicar ou chamar no privado" in A.problemas_no_texto(texto)
+
+
+def test_elogio_que_pede_explicacao_nao_sai_sozinho(engine):
+    g = GoogleFalso()
+    A.sincronizar(engine, [av("x", estrelas=4, comentario="Bom, mas demorou")], agora=AGORA)
+    A.responder_pendentes(engine, respondedor("Valeu, Ana! Conte mais sobre a demora para a gente melhorar."),
+                          responder_google=g.responder, automatica=True, agora=AGORA)
+    assert g.publicadas == [] and "explicar" in _todas(engine)["x"]["motivo_revisao"]
+
+
+@pytest.mark.parametrize("texto,ok", [
+    ("Desculpa pela demora, Ana. Esperamos ter uma nova oportunidade de te receber.\n— Equipe Bar São Paulo", True),
+    ("Sentimos muito. Queremos outra chance de fazer diferente!", True),
+    ("Esperamos uma nova oportunidade. A equipe vai conversar sobre isso.\n— Equipe Bar São Paulo", False),
+    ("Desculpa pela demora, Ana.\n— Equipe Bar São Paulo", False),
+])
+def test_reclamacao_termina_com_nova_oportunidade(texto, ok):
+    assert A.termina_com_nova_oportunidade(texto) is ok
+    motivos = A.motivos_para_revisar(av("x", estrelas=2), texto)
+    assert ("reclamação não termina pedindo nova oportunidade" in motivos) is (not ok)
+
+
+def test_refaz_sugestoes_sem_repetir_o_email(engine):
+    avisos = []
+    A.sincronizar(engine, [av("x", estrelas=2, comentario="Demorou")], agora=AGORA)
+    velho = respondedor("Desculpa. Queremos entender melhor o que aconteceu.\n— Equipe Bar São Paulo")
+    A.responder_pendentes(engine, velho, responder_google=None, automatica=True, alertar=avisos.append, agora=AGORA)
+    automacao.rotina_google(engine, GoogleFalso(), respondedor(
+        "Desculpa pela demora, Ana. Esperamos ter uma nova oportunidade de te atender.\n— Equipe Bar São Paulo"),
+        automatica=True, alertar=avisos.append, agora=AGORA)
+    t = _todas(engine)["x"]
+    assert "nova oportunidade" in t["resposta_sugerida"] and t["situacao"] == A.REVISAR
+    assert "explicar" not in t["motivo_revisao"] and len(avisos) == 1
