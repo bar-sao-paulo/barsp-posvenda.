@@ -616,3 +616,69 @@ def test_jeito_muda_toda_semana():
     semanas = [ia.jeito_da_semana(date(2026, 11, 2) + timedelta(weeks=i)) for i in range(len(ia.JEITOS_DA_SEMANA))]
     assert len(set(semanas)) == len(ia.JEITOS_DA_SEMANA)
     assert ia.jeito_da_semana(date(2026, 11, 2)) == ia.jeito_da_semana(date(2026, 11, 8))  # mesma semana
+
+
+def _erro_400():
+    import anthropic
+    import httpx2 as httpx
+    req = httpx.Request("POST", "https://api.exemplo.invalid/v1/messages")
+    corpo = {"type": "error", "error": {"type": "invalid_request_error", "message": "parâmetro fictício inválido"}}
+    return anthropic.BadRequestError("erro", response=httpx.Response(400, request=req), body=corpo)
+
+
+class _Resp:
+    stop_reason = "end_turn"
+
+    def __init__(self, texto):
+        self.content = [type("B", (), {"type": "text", "text": texto})()]
+
+
+def _json_analise():
+    return json.dumps({"nota": 10, "nota_estimada": False, "resumo": "Gostou", "ressalva": "",
+                       "resposta_sugerida": "Oi, João! Que bom.", "acao_sugerida": "Nada", "pediu_compensacao": False})
+
+
+def test_ia_400_tenta_de_novo_sem_o_beta():
+    chamadas = []
+
+    class Beta:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                chamadas.append(("beta", kw))
+                raise _erro_400()
+
+    class Messages:
+        @staticmethod
+        def create(**kw):
+            chamadas.append(("normal", kw))
+            return _Resp(_json_analise())
+
+    cliente = type("C", (), {"beta": Beta, "messages": Messages})()
+    a = ia.Classificador(client=cliente)({"nome": "João"}, ["10"], "sem compras")
+    assert a.nota == 10 and [c[0] for c in chamadas] == ["beta", "normal"]
+    assert "betas" not in chamadas[1][1] and "fallbacks" not in chamadas[1][1]
+
+
+def test_ia_400_mostra_o_motivo():
+    class Falha:
+        @staticmethod
+        def create(**kw):
+            raise _erro_400()
+
+    cliente = type("C", (), {"beta": type("B", (), {"messages": Falha}), "messages": Falha})()
+    with pytest.raises(IAErro, match="HTTP 400: parâmetro fictício inválido"):
+        ia.Classificador(client=cliente)({"nome": "João"}, ["10"], "sem compras")
+
+
+def test_falha_da_ia_volta_para_a_fila(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "10", quando=datetime.now(timezone.utc) - timedelta(hours=1))
+    respostas.processar_pendentes(engine, ClaudeFalso(erro=True), espera=timedelta(0))
+    assert _resposta(engine).status == respostas.REVISAR
+    claude = ClaudeFalso()
+    respostas.processar_pendentes(engine, claude, espera=timedelta(0))  # logo depois: ainda não tenta de novo
+    assert claude.chamadas == []
+    respostas.processar_pendentes(engine, claude, espera=timedelta(0),
+                                  agora=datetime.now(timezone.utc) + timedelta(minutes=16))
+    assert len(claude.chamadas) == 1 and _resposta(engine).status != respostas.REVISAR

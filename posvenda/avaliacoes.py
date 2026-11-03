@@ -28,6 +28,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from . import lista
+from .ia import motivo_do_erro
 from .db import avaliacoes_google as tab, rotinas
 from .google_perfil import TAMANHO_MAXIMO, GoogleErro
 
@@ -226,7 +227,7 @@ class Respondedor:
                 messages=[{"role": "user", "content": montar_contexto(av)}],
             )
         except anthropic.APIStatusError as exc:
-            raise IAErro(f"A IA não respondeu (HTTP {exc.status_code}).") from exc
+            raise IAErro(f"A IA não respondeu ({motivo_do_erro(exc)}).") from exc
         except anthropic.APIConnectionError as exc:
             raise IAErro("Falha de rede ao falar com a IA.") from exc
         if resp.stop_reason == "refusal":

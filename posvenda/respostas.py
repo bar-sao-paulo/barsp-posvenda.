@@ -326,7 +326,7 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
         a = classificar({**envio, "respostas_recentes": respostas_recentes(engine, agora),
                          "jeito_da_semana": jeito_da_semana(agora.astimezone(lista.TZ).date())}, textos, historico)
     except IAErro as exc:
-        valores = dict(status=REVISAR, motivo_revisao=f"A IA não conseguiu analisar: {exc}", historico=historico,
+        valores = dict(status=REVISAR, motivo_revisao=f"{FALHA_DA_IA}: {exc}"[:300], historico=historico,
                        classificada_em=agora_utc())
     else:
         nota = a.nota
@@ -476,6 +476,19 @@ def ignorar(engine: Engine, resposta_id: int) -> None:
         con.execute(update(respostas).where(respostas.c.id == resposta_id).values(status=IGNORADO))
 
 
+FALHA_DA_IA = "A IA não conseguiu analisar"
+
+
+def reanalisar_falhas_da_ia(engine: Engine, agora: datetime, intervalo: timedelta = timedelta(minutes=15),
+                            dias: int = 3) -> int:
+    """Resposta que ficou em revisão só porque a IA falhou volta para a fila a cada `intervalo` (até `dias`)."""
+    with engine.begin() as con:
+        return con.execute(update(respostas).where(and_(
+            respostas.c.status == REVISAR, respostas.c.motivo_revisao.like(FALHA_DA_IA + "%"),
+            respostas.c.classificada_em <= agora - intervalo,
+            respostas.c.ultima_mensagem_em >= agora - timedelta(days=dias))).values(status=AGUARDANDO)).rowcount
+
+
 def processar_pendentes(engine: Engine, classificar: Classificar | None, *, agora: datetime | None = None,
                         enviar_texto: Callable[[str, str], str] | None = None, resposta_automatica: bool = False,
                         alertar: Callable[[dict[str, Any]], None] | None = None,
@@ -485,6 +498,7 @@ def processar_pendentes(engine: Engine, classificar: Classificar | None, *, agor
     if classificar is None:
         return 0
     agora = agora or agora_utc()
+    reanalisar_falhas_da_ia(engine, agora)
     with engine.connect() as con:
         ids = [r.id for r in con.execute(select(respostas.c.id, respostas.c.ultima_mensagem_em).where(
             respostas.c.status == AGUARDANDO)) if _utc(r.ultima_mensagem_em) <= agora - espera]
