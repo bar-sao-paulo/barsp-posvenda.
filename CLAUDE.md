@@ -28,6 +28,9 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
   ao tocar); áudio sem texto (`direcao="equipe"` escrito pela equipe ou `"transcrito"`) vai para "Revisar antes de enviar".
   Com `OPENAI_API_KEY`, o agendador transcreve cada áudio uma vez (`transcricao.py`, trava `transcrever:<id>`); o áudio
   vai para a OpenAI só para virar texto (decidido pelo Emerson em 15/10/2026).
+- Respostas variam (Emerson, 03/11/2026): a IA recebe as respostas já mandadas nos últimos 28 dias (`respostas.respostas_recentes`)
+  para não repetir abertura, agradecimento e despedida, e um jeito de abrir/fechar que muda toda semana (`ia.JEITOS_DA_SEMANA`).
+  Cliente que pergunta se fala com robô/IA (`respostas._PERGUNTA_ROBO`) vai para revisão: quem responde é a equipe.
 - O Claude sugere nota/resumo/resposta/ação (`ia.py`); as travas (gravidade, revisão, vocabulário proibido,
   compensação, emojis, janela de 24 h) ficam no código (`respostas.py`), não no modelo.
 

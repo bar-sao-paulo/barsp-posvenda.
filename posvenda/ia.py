@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,11 @@ ela precisa aparecer no resumo e na ação.
 Resumo: até 15 palavras, sem ponto e vírgula.
 
 Resposta sugerida (WhatsApp, em nome da Thais):
-- Comece com "Oi, <primeiro nome>!" (ou "Oi!" sem nome). Tom humano, próximo, frases curtas, sem ponto e vírgula.
+- Cumprimente pelo primeiro nome (sem nome, só o cumprimento), seguindo o <jeito_da_semana>. Tom humano, \
+próximo, frases curtas, sem ponto e vírgula.
+- Em <ja_enviadas> estão respostas que já mandamos a outros clientes nas últimas semanas. Não repita delas a \
+abertura, o agradecimento, a despedida nem frases inteiras: o cliente pode já ter recebido uma parecida e a \
+mensagem precisa soar escrita na hora, por uma pessoa. Mude a ordem das ideias e o tamanho da mensagem também.
 - As frases da casa ("Sua opinião é muito importante para nós", "Ficamos felizes que tenha gostado") podem aparecer \
 de vez em quando, mas não em toda mensagem: as respostas do dia são lidas juntas e não podem soar iguais. Prefira \
 comentar algo específico do que o cliente escreveu e varie o agradecimento (ex.: "Obrigada por contar", "Adoramos \
@@ -89,6 +94,21 @@ class Analise:
     pediu_compensacao: bool
 
 
+# Muda toda semana (semana do ano), para as respostas não seguirem sempre o mesmo molde (Emerson, 03/11/2026).
+JEITOS_DA_SEMANA = (
+    'Abra com "Oi, <nome>!" e feche com um convite curto para voltar.',
+    'Abra com "Olá, <nome>, tudo bem?" e feche desejando uma boa semana.',
+    'Abra com "<nome>, que bom receber sua mensagem!" e feche com "Um abraço" ou "Beijo".',
+    'Abra com "Oii, <nome>!" e vá direto ao que o cliente comentou; feche com "Até a próxima!".',
+    'Abra agradecendo pelo nome ("Obrigada pelo retorno, <nome>!") e feche com "Volte sempre!".',
+    'Abra com "Oi, <nome>, tudo bom?" e feche dizendo que a equipe ficou contente com o recado.',
+)
+
+
+def jeito_da_semana(dia: date) -> str:
+    return JEITOS_DA_SEMANA[dia.isocalendar()[1] % len(JEITOS_DA_SEMANA)]
+
+
 def montar_contexto(cliente: dict[str, Any], textos: list[str], historico: str) -> str:
     linhas = [
         "<cliente>",
@@ -99,6 +119,10 @@ def montar_contexto(cliente: dict[str, Any], textos: list[str], historico: str) 
         f"Versão da pesquisa: {cliente.get('versao')}",
         f"Histórico (só para a ação da equipe, nunca citar na resposta): {historico}",
         "</cliente>",
+        f"<jeito_da_semana>{cliente.get('jeito_da_semana') or JEITOS_DA_SEMANA[0]}</jeito_da_semana>",
+        "<ja_enviadas>",
+        *[f"- {t}" for t in cliente.get("respostas_recentes") or []],
+        "</ja_enviadas>",
         "<mensagens>",
         *[f"- {t}" for t in textos],
         "</mensagens>",

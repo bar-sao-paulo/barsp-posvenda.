@@ -6,9 +6,9 @@ import os
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select
 
-from posvenda import automacao, respostas, servico
+from posvenda import automacao, ia, respostas, servico
 from posvenda.db import criar_engine, mensagens, metadata, respostas as t_respostas
 from posvenda.ia import Analise, IAErro, _ler
 from posvenda.web import criar_app
@@ -567,3 +567,52 @@ def test_nps_do_mes_e_filtro_por_mes(app_wa, engine):
     assert "mes=2026-10" in r.headers["Location"]
     vazio = c.get("/respostas?mes=2026-09").get_data(as_text=True)
     assert "Nenhuma nota neste mês ainda" in vazio and "deste mês" in vazio
+
+
+@pytest.mark.parametrize("texto", ["Isso é um robô?", "é uma IA?", "tô falando com bot", "é automático isso?",
+                                   "Você é uma pessoa de verdade?", "foi o ChatGPT que escreveu?"])
+def test_pergunta_se_e_robo(texto):
+    assert respostas.perguntou_se_e_robo([texto])
+
+
+@pytest.mark.parametrize("texto", ["eu ia voltar hoje", "Mensagem automática: estamos fora do horário",
+                                   "nota 10, tudo ótimo", "a robótica do meu filho"])
+def test_nao_e_pergunta_de_robo(texto):
+    assert not respostas.perguntou_se_e_robo([texto])
+
+
+def test_pergunta_de_robo_vai_para_revisao(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "Nota 10! Mas isso aqui é um robô?")
+    respostas.processar_pendentes(engine, ClaudeFalso(), espera=timedelta(0))
+    r = _resposta(engine)
+    assert r.status == respostas.REVISAR and "robô" in r.motivo_revisao
+
+
+def test_ia_recebe_respostas_ja_enviadas_e_jeito_da_semana(engine):
+    from posvenda.db import mensagens
+    _enviar_tudo(engine)
+    with engine.begin() as con:
+        con.execute(insert(mensagens).values(telefone="5511900000099", envio_id=None, direcao="saida",
+                                             texto="Oi, Fulana! Adoramos saber disso.",
+                                             criado_em=datetime.now(timezone.utc) - timedelta(days=3)))
+        con.execute(insert(mensagens).values(telefone="5511900000098", envio_id=None, direcao="saida",
+                                             texto="Muito antiga", criado_em=datetime.now(timezone.utc) - timedelta(days=60)))
+    _receber(engine, "Nota 10")
+    vistos = []
+
+    def claude(cliente, textos, historico):
+        vistos.append(cliente)
+        return analise()
+    respostas.processar_pendentes(engine, claude, espera=timedelta(0))
+    assert vistos[0]["respostas_recentes"] == ["Oi, Fulana! Adoramos saber disso."]
+    assert vistos[0]["jeito_da_semana"] in ia.JEITOS_DA_SEMANA
+    texto = ia.montar_contexto(vistos[0], ["Nota 10"], "sem compras")
+    assert "<ja_enviadas>\n- Oi, Fulana! Adoramos saber disso.\n</ja_enviadas>" in texto
+    assert "<jeito_da_semana>" in texto
+
+
+def test_jeito_muda_toda_semana():
+    semanas = [ia.jeito_da_semana(date(2026, 11, 2) + timedelta(weeks=i)) for i in range(len(ia.JEITOS_DA_SEMANA))]
+    assert len(set(semanas)) == len(ia.JEITOS_DA_SEMANA)
+    assert ia.jeito_da_semana(date(2026, 11, 2)) == ia.jeito_da_semana(date(2026, 11, 8))  # mesma semana

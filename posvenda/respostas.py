@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import historico, lista
 from .db import envios, mensagens, respostas
-from .ia import Analise, IAErro
+from .ia import Analise, IAErro, jeito_da_semana
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +116,25 @@ _VISITAS = re.compile(
     rf"|\b{_CONTAGEM}\s+(visitas|vezes|compras|pedidos)\b"
     r"|\bcliente\s+(fiel|frequente|assiduo|de casa)\b|\bja\s+e\s+de\s+casa\b|\bsempre\s+vem\b"
 )
+
+
+# Cliente perguntando se fala com robô/IA: quem responde é a equipe, nunca a IA (Emerson, 03/11/2026).
+_PERGUNTA_ROBO = re.compile(
+    r"\b(robo|robozinho|bot|chatbot|chat ?gpt)\b|inteligencia artificial|\b(e|eh)\s+(uma\s+)?ia\b"
+    r"|\b(e|eh)\s+automatic[oa]\b|\b(pessoa|humano|humana)\s+(de verdade|real)\b|\b(e|eh)\s+(uma\s+)?maquina\b")
+
+
+def perguntou_se_e_robo(textos: list[str]) -> bool:
+    return any(_PERGUNTA_ROBO.search(lista.sem_acento(t or "")) for t in textos)
+
+
+def respostas_recentes(engine: Engine, agora: datetime | None = None, dias: int = 28, limite: int = 25) -> list[str]:
+    """Respostas que já mandamos aos clientes (mais novas primeiro), para a IA não repetir o molde."""
+    desde = (agora or agora_utc()) - timedelta(days=dias)
+    with engine.connect() as con:
+        return [r.texto for r in con.execute(
+            select(mensagens.c.texto).where(and_(mensagens.c.direcao == "saida", mensagens.c.criado_em >= desde))
+            .order_by(mensagens.c.criado_em.desc()).limit(limite)) if r.texto]
 
 
 def problemas_na_resposta(texto: str) -> list[str]:
@@ -300,8 +319,12 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
         motivos.append("cliente mandou áudio: ouça e escreva o que ele disse")
     if r.respondida_em is not None:
         motivos.append("cliente escreveu de novo depois da nossa resposta")
+    if perguntou_se_e_robo(textos):
+        motivos.append("cliente perguntou se fala com robô: responda você")
+    agora = agora_utc()
     try:
-        a = classificar(envio, textos, historico)
+        a = classificar({**envio, "respostas_recentes": respostas_recentes(engine, agora),
+                         "jeito_da_semana": jeito_da_semana(agora.astimezone(lista.TZ).date())}, textos, historico)
     except IAErro as exc:
         valores = dict(status=REVISAR, motivo_revisao=f"A IA não conseguiu analisar: {exc}", historico=historico,
                        classificada_em=agora_utc())
