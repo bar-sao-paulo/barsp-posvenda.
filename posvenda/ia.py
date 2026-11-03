@@ -83,6 +83,18 @@ class IAErro(RuntimeError):
     pass
 
 
+def motivo_do_erro(exc: Exception) -> str:
+    """'HTTP 400: <mensagem da API>' (a mensagem da API não tem chave nem dado do cliente), curta para a tela."""
+    corpo = getattr(exc, "body", None)
+    msg = ""
+    if isinstance(corpo, dict):
+        erro = corpo.get("error") if isinstance(corpo.get("error"), dict) else corpo
+        msg = str(erro.get("message") or "")
+    msg = " ".join(msg.split())[:160]
+    codigo = getattr(exc, "status_code", "?")
+    return f"HTTP {codigo}: {msg}" if msg else f"HTTP {codigo}"
+
+
 @dataclass
 class Analise:
     nota: int
@@ -155,18 +167,20 @@ class Classificador:
 
     def __call__(self, cliente: dict[str, Any], textos: list[str], historico: str) -> Analise:
         import anthropic
+        pedido = dict(model=self._modelo, max_tokens=8000,
+                      output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ESQUEMA}},
+                      system=SISTEMA,
+                      messages=[{"role": "user", "content": montar_contexto(cliente, textos, historico)}])
         try:
-            resp = self._client.beta.messages.create(
-                model=self._modelo,
-                max_tokens=8000,
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-                output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ESQUEMA}},
-                system=SISTEMA,
-                messages=[{"role": "user", "content": montar_contexto(cliente, textos, historico)}],
-            )
+            try:
+                resp = self._client.beta.messages.create(betas=["server-side-fallback-2026-07-01"],
+                                                         fallbacks="default", **pedido)
+            except anthropic.BadRequestError as exc:  # 400: tenta uma vez sem o recurso beta
+                log.warning("IA recusou o pedido (%s); tentando sem o beta", motivo_do_erro(exc))
+                resp = self._client.messages.create(**pedido)
         except anthropic.APIStatusError as exc:
-            raise IAErro(f"A IA não respondeu (HTTP {exc.status_code}).") from exc
+            log.warning("IA não respondeu: %s", motivo_do_erro(exc))
+            raise IAErro(f"A IA não respondeu ({motivo_do_erro(exc)}).") from exc
         except anthropic.APIConnectionError as exc:
             raise IAErro("Falha de rede ao falar com a IA.") from exc
         if resp.stop_reason == "refusal":
