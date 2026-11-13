@@ -5,6 +5,8 @@ Regras (instruções do projeto Pós-venda):
 - Gravidade: 🔴 Crítico = nota 0 a 5 | 🟡 Atenção = 6 a 8 | 🟢 Positivo = 9 e 10.
 - Resposta curta só de elogio ("ótimo", "tudo certo", 👍, ❤️), sem crítica: nota estimada 9 (🟢).
   Sugestão sem crítica nem pedido: nota estimada 9 (decidido pelo Emerson em 14/10/2026).
+- Elogio claro com uma ressalva leve (sal, preço, demora, temperatura), sem nota: nota estimada pelo menos 9 (🟢),
+  com a ressalva no Resumo e na Ação (decidido pelo Emerson em 13/11/2026).
 - Resposta neutra ou ambígua ("ok", "oi", resposta automática): nota estimada 8 (🟡).
 - 🔴 nunca é respondida de forma automática: sai como "Revisar antes de enviar".
 - Nunca prometer compensação, nem usar o vocabulário proibido; no máximo 2 emojis.
@@ -71,6 +73,32 @@ def eh_positiva_curta(textos: list[str]) -> bool:
     texto = re.sub(r"\btd\b", "tudo", texto)
     texto = " ".join(_CUMPRIMENTOS.sub(" ", texto).split())
     return texto in _POSITIVAS or (not texto and bool(emojis))
+
+
+# Elogio claro com ressalva leve (Emerson, 13/11/2026): "eu gostei muito, só achei um acima do sal" é 9 ou 10.
+_ELOGIO_CLARO = re.compile(r"\b(gostei|gostamos|amei|amamos|adorei|adoramos|curti|curtimos|aprovado|aprovei|"
+                           r"(muito|mt|mto|super|bem) (bom|boa|gostoso|gostosa)|(tudo|tava|estava|foi) "
+                           r"(otimo|otima|perfeito|perfeita|excelente|maravilhoso|delicioso|deliciosa|top|show)|"
+                           r"delicios[oa]|uma delicia|excelente|maravilhos[oa]|sensacional)\b")
+_RESSALVA_LEVE = re.compile(r"\b(sal|salgad[oa]s?|preco|car[oa]s?|caro demais|demor\w*|frio|fria|morno|morna|"
+                            r"gelad[oa]|quente|temperatura|porcao|pouc[oa]|doce demais|apimentad[oa]|"
+                            r"pimenta|tempero|barulho|fila)\b")
+_CRITICA_FORTE = re.compile(r"\b(nao gostei|nao gostamos|ruim|pessim[oa]|horrivel|nojo|nojent[oa]|cru|crua|"
+                            r"estragad[oa]|azed[oa]|podre|cabelo|inseto|barata|passei mal|passamos mal|intoxica\w*|"
+                            r"vomit\w*|diarreia|nunca mais|decepcion\w*|grosseir[oa]|grosso|mal educad[oa]|"
+                            r"errad[oa]|faltou|faltando|veio sem|nao veio|reembolso|dinheiro de volta|cancel\w*|"
+                            r"reclama\w*|absurdo|queimad[oa])\b")
+
+
+def eh_elogio_com_ressalva_leve(textos: list[str]) -> bool:
+    """O cliente diz claramente que gostou e só faz uma ressalva leve (sal, preço, demora, temperatura etc.)."""
+    junto = " ".join(textos)
+    emojis = [c for c in junto if _EMOJI.match(c) and not 0x1F3FB <= ord(c) <= 0x1F3FF]
+    if any(c not in _EMOJI_POSITIVO for c in emojis):
+        return False
+    texto = " ".join(re.sub(r"[^\w\s]", " ", lista.sem_acento(_EMOJI.sub(" ", junto)).lower()).split())
+    return (bool(_ELOGIO_CLARO.search(texto)) and bool(_RESSALVA_LEVE.search(texto))
+            and not _CRITICA_FORTE.search(texto))
 
 
 Classificar = Callable[[dict[str, Any], list[str], str], Analise]
@@ -332,6 +360,8 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
         nota = a.nota
         if a.nota_estimada:
             if eh_positiva_curta(textos):
+                nota = 9
+            elif nota is not None and nota < 9 and eh_elogio_com_ressalva_leve(textos):
                 nota = 9
             elif eh_ambigua(textos):
                 nota = 8

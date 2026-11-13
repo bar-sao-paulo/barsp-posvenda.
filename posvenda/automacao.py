@@ -259,6 +259,9 @@ def rodar_uma_vez(engine: Engine, cfg: Config, *, buscar=None, whatsapp=None, cl
     if classificar is not None and travar(engine, "reavaliar-nota-8:v1"):
         n = respostas.reavaliar_estimadas(engine)  # regra nova (14/10/2026): elogio curto e sugestão = 9
         registrar(engine, "reavaliar-nota-8:v1", f"{n} resposta(s) devolvida(s) para análise")
+    if classificar is not None and travar(engine, "reavaliar-nota-8:v2"):
+        n = respostas.reavaliar_estimadas(engine)  # regra nova (13/11/2026): elogio com ressalva leve = 9 ou 10
+        registrar(engine, "reavaliar-nota-8:v2", f"{n} resposta(s) devolvida(s) para análise")
     if travar(engine, "revisar-audios:v1"):  # áudios analisados antes da trava do áudio (15/10/2026)
         n = respostas.revisar_audios_antigos(engine)
         registrar(engine, "revisar-audios:v1", f"{n} resposta(s) com áudio sem texto foram para revisão")

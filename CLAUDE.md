@@ -21,7 +21,7 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - Nunca prometer desconto, cortesia ou reembolso ao cliente; no máximo 2 emojis por mensagem.
 - Nunca dizer ao cliente quantas vezes ele veio ou comprou ("terceira visita", "cliente fiel"): o número costuma estar
   errado (Emerson, 17/10/2026). O histórico vai só para a ação da equipe; a trava `_VISITAS` manda para revisão.
-- Respostas: 🔴 0–5, 🟡 6–8, 🟢 9–10; elogio curto sem crítica ("ótimo", "tudo certo", 👍, ❤️) ou sugestão sem crítica = 9 estimada; neutra/ambígua ("ok", "oi", resposta automática) = 8 estimada; ressalva vai para Resumo e Ação.
+- Respostas: 🔴 0–5, 🟡 6–8, 🟢 9–10; elogio curto sem crítica ("ótimo", "tudo certo", 👍, ❤️) ou sugestão sem crítica = 9 estimada; neutra/ambígua ("ok", "oi", resposta automática) = 8 estimada; elogio claro com ressalva leve (sal, preço, demora, temperatura) = 9 ou 10 estimada (`respostas.eh_elogio_com_ressalva_leve`, Emerson, 13/11/2026); ressalva vai para Resumo e Ação.
 - 🔴 nunca sai sozinha ("Revisar antes de enviar"). Resposta ligada só pelo telefone (DDD + 8 últimos dígitos);
   número que não está na lista fica em "Fora da lista". "PARAR" bloqueia o telefone.
 - Áudio: o Claude não ouve. O id da mídia fica em `mensagens.midia_id` (o arquivo não é guardado; o painel busca na Meta

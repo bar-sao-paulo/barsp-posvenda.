@@ -506,6 +506,43 @@ def test_elogio_curto_vira_9_estimada(engine):
     assert r.nota == 9 and r.gravidade == respostas.POSITIVO and r.nota_estimada
 
 
+@pytest.mark.parametrize("textos", [["Oi eu gostei muito, só achei um acima do sal pra mim 🙏"],
+                                    ["Amei a picanha, só achei o preço um pouco alto"],
+                                    ["Gostei bastante", "a entrega demorou um pouquinho"],
+                                    ["Tava tudo ótimo, só o chopp veio meio quente"]])
+def test_elogio_com_ressalva_leve(textos):
+    assert respostas.eh_elogio_com_ressalva_leve(textos)
+
+
+@pytest.mark.parametrize("textos", [["ok"], ["Gostei"], ["Não gostei, muito salgado"],
+                                    ["Gostei do lugar mas a carne veio crua"], ["Achei caro e demorado"],
+                                    ["Amei, mas o garçom foi grosso e demorou"], ["gostei, só achei salgado 😡"]])
+def test_nao_e_elogio_com_ressalva_leve(textos):
+    assert not respostas.eh_elogio_com_ressalva_leve(textos)
+
+
+def test_elogio_com_ressalva_leve_vira_9_estimada(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "Oi eu gostei muito, só achei um acima do sal pra mim 🙏")
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=8, estimada=True, ressalva="achou salgado")),
+                                  agora=AGORA)
+    r = _resposta(engine)
+    assert r.nota == 9 and r.gravidade == respostas.POSITIVO and r.nota_estimada
+    assert "salgado" in r.resumo and "salgado" in r.acao_sugerida
+
+
+def test_elogio_com_ressalva_leve_mantem_10(engine):
+    _enviar_tudo(engine)
+    _receber(engine, "Adorei tudo, só demorou um pouco")
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=10, estimada=True)), agora=AGORA)
+    assert _resposta(engine).nota == 10
+
+
+def test_prompt_elogio_com_ressalva_leve():
+    from posvenda.ia import SISTEMA
+    assert "ressalva leve" in SISTEMA and "acima do sal" in SISTEMA
+
+
 def test_reavaliacao_unica_das_notas_8(engine):
     _enviar_tudo(engine)
     _receber(engine, "❤️")
