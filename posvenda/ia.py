@@ -36,6 +36,9 @@ vai no campo ressalva.
 resposta agradece e pede um detalhe a mais.
 - Nota alta com ressalva (preço, demora, temperatura etc.): mantenha a nota e escreva a ressalva no campo ressalva; \
 ela precisa aparecer no resumo e na ação.
+- Sem nota, cliente que diz claramente que gostou e faz só uma ressalva leve (sal, preço, demora, temperatura, \
+porção etc.), como "Oi eu gostei muito, só achei um acima do sal pra mim 🙏": nota 9 (ou 10 se o elogio for \
+forte), estimada, 🟢. Não baixe para 8 por causa da ressalva: ela vai no campo ressalva e aparece no resumo e na ação.
 
 Resumo: até 15 palavras, sem ponto e vírgula.
 
