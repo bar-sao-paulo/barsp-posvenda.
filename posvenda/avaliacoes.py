@@ -55,6 +55,11 @@ _PEDE_EXPLICACAO = re.compile(r"\b(nos )?(cont(e|ar|a)|explic(ar|ue|a)|detalh(ar
                               r"|\bentender melhor\b|\b(no|pelo|em) (privado|direct|inbox|dm)\b|\bmensagem privada\b"
                               r"|\bfal(e|ar) (com a gente|conosco)\b|\bentr(e|ar) em contato\b|\bnos (chame|procure|escreva)\b"
                               r"|\bfique a vontade para (nos )?(contar|falar|escrever)\b")
+# Agradecer pelas estrelas, pela nota ou pela avaliação (Emerson, 14/11/2026: agradecer pela preferência, pela
+# visita ou pela escolha). Comparado sem acento, em minúsculas.
+_AGRADECE_ESTRELAS = re.compile(r"\b(estrela\w*|nota (maxima|5|cinco|10|dez)|cinco de cinco|5 de 5|5/5)\b"
+                                r"|\b(obrigad[oa]s?|agradec\w*|valeu)\b.{0,30}\b(pel[ao]s?|por) (sua |tua |essa |esta |a )?"
+                                r"(avaliac\w*|nota)\b")
 # Fecho da reclamação: pedido de nova oportunidade.
 _NOVA_OPORTUNIDADE = re.compile(r"\b(nova|outra) (oportunidade|chance)\b")
 # Assuntos que o dono decide (comparado sem acento, em minúsculas).
@@ -108,6 +113,8 @@ def problemas_no_texto(texto: str) -> list[str]:
         problemas.append("usa vocabulário proibido")
     if _PEDE_EXPLICACAO.search(baixo):
         problemas.append("pede para o cliente explicar ou chamar no privado")
+    if _AGRADECE_ESTRELAS.search(baixo):
+        problemas.append("agradece pelas estrelas ou pela avaliação (agradeça pela preferência)")
     if len(_EMOJI.findall(texto or "")) > 1:
         problemas.append("mais de 1 emoji")
     if len((texto or "").encode("utf-8")) > TAMANHO_MAXIMO:
@@ -134,9 +141,12 @@ Regras:
 assinatura em linha separada: "— Equipe Bar São Paulo".
 - Use o primeiro nome do cliente só se parecer nome de pessoa (ex.: "Ana Souza" → "Ana"). Apelido, nome de empresa, \
 tudo em maiúsculas ou anônimo: não use nome nenhum.
+- Nunca agradeça pelas estrelas, pela nota ou pela avaliação ("obrigado pelas cinco estrelas", "obrigado pela \
+avaliação") e não cite estrelas nem nota na resposta. Agradeça pela preferência, pela visita, pela escolha ou pelo \
+carinho (ex.: "Obrigado pela preferência!", "Que bom ter você com a gente!"). Varie as palavras.
 - Elogio (4 ou 5 estrelas): agradeça e comente algo específico que a pessoa citou (prato, chopp, atendimento, \
 ambiente). Convide para voltar. Se houver uma ressalva, reconheça em meia frase e diga que a equipe vai olhar isso.
-- Só estrelas, sem comentário: uma ou duas frases. Elogio: agradeça. Reclamação: peça desculpas e termine pedindo \
+- Só estrelas, sem comentário: uma ou duas frases. Elogio: agradeça pela preferência e convide para voltar. Reclamação: peça desculpas e termine pedindo \
 uma nova oportunidade. Varie as palavras.
 - Reclamação (1 a 3 estrelas): agradeça o retorno, peça desculpas sem rodeios e cite o problema em poucas palavras. \
 A ÚLTIMA frase antes da assinatura é sempre o pedido de uma nova oportunidade de atender o cliente (ex.: "Esperamos \
