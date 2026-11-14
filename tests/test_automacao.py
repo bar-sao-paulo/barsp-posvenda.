@@ -719,3 +719,33 @@ def test_falha_da_ia_volta_para_a_fila(engine):
     respostas.processar_pendentes(engine, claude, espera=timedelta(0),
                                   agora=datetime.now(timezone.utc) + timedelta(minutes=16))
     assert len(claude.chamadas) == 1 and _resposta(engine).status != respostas.REVISAR
+
+
+class WhatsAppSemModelo(WhatsAppFalso):
+    """Meta sem o modelo pesquisa_a cadastrado em pt_BR (como em 13/11/2026)."""
+
+    def __init__(self, faltando=("pesquisa_a",)):
+        super().__init__()
+        self.faltando, self.tentativas = set(faltando), []
+
+    def enviar_modelo(self, telefone, modelo, parametros, idioma="pt_BR"):
+        self.tentativas.append(modelo)
+        if modelo in self.faltando:
+            raise WhatsAppErro(f"WhatsApp recusou (HTTP 404, código 132001): template name ({modelo}) "
+                               "does not exist in pt_BR", 132001)
+        return super().enviar_modelo(telefone, modelo, parametros, idioma)
+
+
+def test_modelo_inexistente_para_de_tentar_e_mostra_versao(engine):
+    versoes = [e["versao"] for e in servico.obter_lista(engine, DIA).envios]
+    wa = WhatsAppSemModelo()
+    res, _ = _enviar_tudo(engine, wa)
+    n_a = versoes.count("A")
+    assert n_a >= 1
+    assert res.falhas == n_a and res.enviados == len(versoes) - n_a
+    assert wa.tentativas.count("pesquisa_a") == 1  # não insiste com os outros clientes da versão A
+    assert res.falhas_por_versao == {"A": n_a}
+    assert f"{n_a} com erro (A: {n_a})" in res.resumo
+    assert res.erros_diferentes == [res.erros[0]] and "pesquisa_a" in res.erros[0]
+    falhou = [e for e in servico.obter_lista(engine, DIA).envios if e["versao"] == "A"]
+    assert all(e["enviado_em"] is None and "132001" in e["erro"] for e in falhou)

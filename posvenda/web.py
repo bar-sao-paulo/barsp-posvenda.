@@ -284,8 +284,10 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
             flash("WhatsApp não configurado no Railway (WHATSAPP_TOKEN e WHATSAPP_PHONE_NUMBER_ID).")
         else:
             res = automacao.enviar_dia(engine, dia, wa.enviar_modelo, cfg.modelos)
+            erros = res.erros_diferentes
             flash(f"Pesquisa pelo WhatsApp: {res.resumo}."
-                  + (f" Primeiro erro: {res.erros[0]}" if res.erros else ""))
+                  + (f" Erro: {erros[0]}" if len(erros) == 1 else "")
+                  + (f" Erros: {' | '.join(erros[:3])}" if len(erros) > 1 else ""))
         return redirect(url_for("envio", data=dia.isoformat()))
 
     @app.post("/envio/<int:envio_id>/enviado")
