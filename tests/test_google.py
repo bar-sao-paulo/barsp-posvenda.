@@ -397,3 +397,36 @@ def test_refaz_sugestoes_sem_repetir_o_email(engine):
     t = _todas(engine)["x"]
     assert "nova oportunidade" in t["resposta_sugerida"] and t["situacao"] == A.REVISAR
     assert "explicar" not in t["motivo_revisao"] and len(avisos) == 1
+
+
+# --------------------------------------------------------------------------- regra de 14/11/2026
+@pytest.mark.parametrize("texto", [
+    "Fabrício, muito obrigado pelas cinco estrelas! Volte sempre.\n— Equipe Bar São Paulo",
+    "Valeu pelas 5 estrelas, Ana!",
+    "Obrigado pela avaliação! Esperamos te ver de novo.",
+    "Agradecemos pela sua nota, volte sempre!",
+    "Muito obrigado pela nota máxima!",
+])
+def test_nao_agradece_pelas_estrelas(texto):
+    assert any("estrelas" in p for p in A.problemas_no_texto(texto))
+
+
+@pytest.mark.parametrize("texto", [
+    "Fabrício, muito obrigado pela preferência! Volte sempre.\n— Equipe Bar São Paulo",
+    "Que bom ter você com a gente, Ana! Obrigado pela visita.",
+    "Obrigado pelo retorno, Ana. Sentimos muito pela demora. Esperamos ter uma nova oportunidade de te receber.",
+])
+def test_agradecer_pela_preferencia_pode(texto):
+    assert A.problemas_no_texto(texto) == []
+
+
+def test_elogio_que_agradece_as_estrelas_nao_sai_sozinho(engine):
+    g = GoogleFalso()
+    A.sincronizar(engine, [av("x", estrelas=5, comentario="")], agora=AGORA)
+    A.responder_pendentes(engine, respondedor("Ana, obrigado pelas cinco estrelas!\n— Equipe Bar São Paulo"),
+                          responder_google=g.responder, automatica=True, agora=AGORA)
+    assert g.publicadas == [] and "estrelas" in _todas(engine)["x"]["motivo_revisao"]
+
+
+def test_prompt_pede_para_agradecer_a_preferencia():
+    assert "preferência" in A.SISTEMA and "Nunca agradeça pelas estrelas" in A.SISTEMA
