@@ -152,6 +152,24 @@ _PERGUNTA_ROBO = re.compile(
     r"|\b(e|eh)\s+automatic[oa]\b|\b(pessoa|humano|humana)\s+(de verdade|real)\b|\b(e|eh)\s+(uma\s+)?maquina\b")
 
 
+# Resposta automática do celular do cliente (WhatsApp Business: saudação ou "ausente"). Não é avaliação da visita:
+# a equipe aguarda, sem resposta sugerida (Emerson, 18/11/2026). Comparado sem acento e em minúsculas.
+_AUTOMATICA = re.compile(
+    r"agradeco (o |a |pelo |pela )?(seu |sua )?(contato|mensagem)|obrigad[oa] (pelo|por entrar em) contato"
+    r"|nao (estou|estamos) disponive(l|is)|(responderei|retornarei|responderemos|retornaremos|respondo|retorno)"
+    r" (assim que|o mais rapido|em breve|logo)|mensagem automatica|resposta automatica|fora do (nosso )?horario"
+    r"|no momento nao (posso|podemos|consigo)|como (posso|podemos) (te )?ajudar|em que (posso|podemos) ajudar")
+
+
+def eh_resposta_automatica(textos: list[str]) -> bool:
+    """Todas as mensagens do cliente são respostas automáticas do celular dele (nenhuma fala da visita)."""
+    textos = [t for t in textos if (t or "").strip()]
+    return bool(textos) and all(_AUTOMATICA.search(lista.sem_acento(t).lower()) for t in textos)
+
+
+MOTIVO_AUTOMATICA = "só resposta automática do celular do cliente: aguarde, não precisa responder"
+
+
 def perguntou_se_e_robo(textos: list[str]) -> bool:
     return any(_PERGUNTA_ROBO.search(lista.sem_acento(t or "")) for t in textos)
 
@@ -250,10 +268,11 @@ def _salvar_resposta(engine: Engine, envio_id: int, quando: datetime, *, status:
                 **({"resumo": resumo, "motivo_revisao": motivo} if resumo or motivo else {})))
 
 
-def _gravar_saida(engine: Engine, telefone: str, envio_id: int | None, texto: str, wa_id: str) -> None:
+def _gravar_saida(engine: Engine, telefone: str, envio_id: int | None, texto: str, wa_id: str,
+                  quando: datetime | None = None) -> None:
     with engine.begin() as con:
         con.execute(insert(mensagens).values(telefone=telefone, envio_id=envio_id, direcao="saida", texto=texto,
-                                             wa_id=wa_id or None, criado_em=agora_utc()))
+                                             wa_id=wa_id or None, criado_em=quando or agora_utc()))
 
 
 def atualizar_situacao(engine: Engine, wa_id: str, status: str, erro: str = "") -> None:
@@ -285,6 +304,30 @@ def falas_do_cliente(engine: Engine, envio_id: int) -> list[dict[str, Any]]:
             select(mensagens.c.id, mensagens.c.texto, mensagens.c.direcao, mensagens.c.midia_id, mensagens.c.midia_tipo)
             .where(and_(mensagens.c.envio_id == envio_id, mensagens.c.direcao.in_(("entrada", *ANOTACOES))))
             .order_by(mensagens.c.criado_em, mensagens.c.id))]
+
+
+def conversa(engine: Engine, envio: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tudo o que já foi trocado com o cliente nesse envio, em ordem: a pesquisa que mandamos, as mensagens dele e
+    as nossas respostas. Cada mensagem do cliente leva `numero` (1ª, 2ª...) e `depois_da_nossa` quando chegou
+    depois de uma resposta nossa (Emerson, 18/11/2026)."""
+    itens: list[dict[str, Any]] = []
+    if envio.get("enviado_em"):
+        itens.append({"direcao": "pesquisa", "texto": envio.get("mensagem") or "", "criado_em": envio["enviado_em"],
+                      "id": 0, "midia_id": None, "midia_tipo": None})
+    with engine.connect() as con:
+        itens += [dict(r._mapping) for r in con.execute(
+            select(mensagens.c.id, mensagens.c.texto, mensagens.c.direcao, mensagens.c.midia_id, mensagens.c.midia_tipo,
+                   mensagens.c.criado_em)
+            .where(mensagens.c.envio_id == envio["id"]).order_by(mensagens.c.criado_em, mensagens.c.id))]
+    n, nossa = 0, False
+    for i in itens:
+        i["criado_em"] = _utc(i["criado_em"])
+        if i["direcao"] == "saida":
+            nossa = True
+        elif i["direcao"] == "entrada":
+            n += 1
+            i["numero"], i["depois_da_nossa"] = n, nossa
+    return itens
 
 
 def audios_para_transcrever(engine: Engine, desde: datetime) -> list[dict[str, Any]]:
@@ -358,7 +401,10 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
                        classificada_em=agora_utc())
     else:
         nota = a.nota
-        if a.nota_estimada:
+        automatica = eh_resposta_automatica(textos)
+        if automatica:
+            nota, a.nota_estimada = 8, True
+        elif a.nota_estimada:
             if eh_positiva_curta(textos):
                 nota = 9
             elif nota is not None and nota < 9 and eh_elogio_com_ressalva_leve(textos):
@@ -373,13 +419,18 @@ def analisar(engine: Engine, resposta_id: int, classificar: Classificar) -> dict
                 resumo = f"{resumo} (ressalva: {a.ressalva})"
             if a.ressalva.lower() not in acao.lower():
                 acao = f"{acao} Ressalva do cliente: {a.ressalva}."
-        motivos += problemas_na_resposta(a.resposta_sugerida)
+        resposta = a.resposta_sugerida.replace(";", ",")
+        if automatica:  # nada para responder: a ação é aguardar sem insistir
+            resposta = ""
+            motivos.append(MOTIVO_AUTOMATICA)
+        else:
+            motivos += problemas_na_resposta(a.resposta_sugerida)
         if a.pediu_compensacao:
             motivos.append("cliente pediu compensação")
         if g == CRITICO:
             motivos.insert(0, "crítica 🔴")
         valores = dict(nota=nota, nota_estimada=a.nota_estimada, gravidade=g, resumo=resumo[:300], historico=historico,
-                       resposta_sugerida=a.resposta_sugerida.replace(";", ","), acao_sugerida=acao,
+                       resposta_sugerida=resposta, acao_sugerida=acao,
                        status=REVISAR if motivos else PODE_ENVIAR, motivo_revisao=", ".join(motivos)[:300],
                        classificada_em=agora_utc())
     with engine.begin() as con:
@@ -414,7 +465,7 @@ def enviar_resposta(engine: Engine, resposta_id: int, texto: str, enviar_texto: 
         raise RespostaErro("Já passaram 24 horas desde a última mensagem do cliente. O WhatsApp só deixa "
                            "mandar texto livre dentro desse prazo.")
     wa = enviar_texto(r.telefone, texto)
-    _gravar_saida(engine, r.telefone, r.envio_id, texto, wa)
+    _gravar_saida(engine, r.telefone, r.envio_id, texto, wa, agora)
     with engine.begin() as con:
         con.execute(update(respostas).where(respostas.c.id == resposta_id).values(
             status=RESPONDIDO, respondida_em=agora, resposta_sugerida=texto))
@@ -562,7 +613,8 @@ def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> lis
     with engine.connect() as con:
         rows = [dict(r._mapping) for r in con.execute(
             select(respostas, envios.c.data_visita, envios.c.nome_completo, envios.c.nome, envios.c.telefone,
-                   envios.c.origem, envios.c.prato, envios.c.versao, envios.c.itens, envios.c.local, envios.c.turno)
+                   envios.c.origem, envios.c.prato, envios.c.versao, envios.c.itens, envios.c.local, envios.c.turno,
+                   envios.c.mensagem, envios.c.enviado_em)
             .join(envios, envios.c.id == respostas.c.envio_id)
             .where(and_(envios.c.data_visita >= de, envios.c.data_visita <= ate)))]
     for r, (txt, n) in zip(rows, historico.compras(engine, [(r["telefone"], r["data_visita"]) for r in rows],
@@ -571,6 +623,8 @@ def listar(engine: Engine, de: date, ate: date, hoje: date | None = None) -> lis
     for r in rows:
         r["falas"] = falas_do_cliente(engine, r["envio_id"])
         r["textos"] = [f["texto"] for f in r["falas"]]
+        r["conversa"] = conversa(engine, {"id": r["envio_id"], "mensagem": r["mensagem"], "enviado_em": r["enviado_em"]})
+        r["mensagens_do_cliente"] = sum(1 for c in r["conversa"] if c["direcao"] == "entrada")
         r["audio_pendente"] = audio_sem_texto(r["falas"])
     rows.sort(key=lambda r: (r["nota"] if r["nota"] is not None else -1, bool(r["nota_estimada"]), -r["visitas"]))
     return rows

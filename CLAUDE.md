@@ -30,6 +30,10 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
   vai para a OpenAI só para virar texto (decidido pelo Emerson em 15/10/2026).
 - Respostas variam (Emerson, 03/11/2026): a IA recebe as respostas já mandadas nos últimos 28 dias (`respostas.respostas_recentes`)
   para não repetir abertura, agradecimento e despedida, e um jeito de abrir/fechar que muda toda semana (`ia.JEITOS_DA_SEMANA`).
+  Só resposta automática do celular do cliente (`respostas.eh_resposta_automatica`: "Agradeço seu contato", "não estou
+  disponível"...) = 8 estimada, sem resposta sugerida, em revisão (aguardar sem insistir; Emerson, 18/11/2026).
+  O cartão mostra a conversa toda (`respostas.conversa`): a pesquisa e as nossas respostas já enviadas, e numera as
+  mensagens do cliente ("2ª mensagem, depois da nossa resposta").
   Cliente que pergunta se fala com robô/IA (`respostas._PERGUNTA_ROBO`) vai para revisão: quem responde é a equipe.
 - O Claude sugere nota/resumo/resposta/ação (`ia.py`); as travas (gravidade, revisão, vocabulário proibido,
   compensação, emojis, janela de 24 h) ficam no código (`respostas.py`), não no modelo.

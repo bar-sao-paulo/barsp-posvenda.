@@ -32,6 +32,9 @@ log = logging.getLogger(__name__)
 
 ENVIO_HORA_PADRAO = 11
 MODELOS_PADRAO = {"A": "pesquisa_a", "B": "pesquisa_b", "C": "pesquisa_c"}
+# Códigos da Meta para modelo que não existe (ou não existe no idioma pedido, 132001) ou não está aprovado/ativo
+# (132015 pausado, 132016 desativado): não adianta tentar de novo com os outros clientes da mesma versão.
+ERROS_DE_MODELO = {132001, 132015, 132016}
 
 
 def parametros_do_modelo(envio: dict[str, Any]) -> list[str]:
@@ -45,12 +48,19 @@ class ResultadoEnvio:
     falhas: int = 0
     pulados: int = 0
     erros: list[str] = field(default_factory=list)
+    falhas_por_versao: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def erros_diferentes(self) -> list[str]:
+        return list(dict.fromkeys(self.erros))
 
     @property
     def resumo(self) -> str:
         texto = f"{self.enviados} enviadas"
         if self.falhas:
             texto += f", {self.falhas} com erro"
+            if self.falhas_por_versao:
+                texto += " (" + ", ".join(f"{v}: {n}" for v, n in sorted(self.falhas_por_versao.items())) + ")"
         if self.pulados:
             texto += f", {self.pulados} puladas (pediram para não receber)"
         return texto
@@ -62,16 +72,23 @@ def enviar_dia(engine: Engine, dia: date, enviar_modelo: Callable[[str, str, lis
     modelos = modelos or MODELOS_PADRAO
     res = ResultadoEnvio()
     bloqueados = servico.telefones_bloqueados(engine)
+    modelos_com_erro: dict[str, str] = {}  # modelo -> erro da Meta (modelo inexistente, pausado ou desativado)
     for e in servico.obter_lista(engine, dia).envios:
         if e["enviado_em"] is not None:
             continue
         if e["telefone"] in bloqueados:  # pediu para parar depois que a lista foi montada
             res.pulados += 1
             continue
+        modelo = modelos[e["versao"]]
         try:
-            wa_id = enviar_modelo(e["telefone"], modelos[e["versao"]], parametros_do_modelo(e))
+            if modelo in modelos_com_erro:
+                raise WhatsAppErro(modelos_com_erro[modelo])
+            wa_id = enviar_modelo(e["telefone"], modelo, parametros_do_modelo(e))
         except WhatsAppErro as exc:
+            if exc.codigo in ERROS_DE_MODELO:
+                modelos_com_erro[modelo] = str(exc)
             res.falhas += 1
+            res.falhas_por_versao[e["versao"]] = res.falhas_por_versao.get(e["versao"], 0) + 1
             res.erros.append(str(exc))
             with engine.begin() as con:
                 con.execute(update(envios).where(envios.c.id == e["id"]).values(

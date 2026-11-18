@@ -719,3 +719,73 @@ def test_falha_da_ia_volta_para_a_fila(engine):
     respostas.processar_pendentes(engine, claude, espera=timedelta(0),
                                   agora=datetime.now(timezone.utc) + timedelta(minutes=16))
     assert len(claude.chamadas) == 1 and _resposta(engine).status != respostas.REVISAR
+
+
+class WhatsAppSemModelo(WhatsAppFalso):
+    """Meta sem o modelo pesquisa_a cadastrado em pt_BR (como em 13/11/2026)."""
+
+    def __init__(self, faltando=("pesquisa_a",)):
+        super().__init__()
+        self.faltando, self.tentativas = set(faltando), []
+
+    def enviar_modelo(self, telefone, modelo, parametros, idioma="pt_BR"):
+        self.tentativas.append(modelo)
+        if modelo in self.faltando:
+            raise WhatsAppErro(f"WhatsApp recusou (HTTP 404, código 132001): template name ({modelo}) "
+                               "does not exist in pt_BR", 132001)
+        return super().enviar_modelo(telefone, modelo, parametros, idioma)
+
+
+def test_modelo_inexistente_para_de_tentar_e_mostra_versao(engine):
+    versoes = [e["versao"] for e in servico.obter_lista(engine, DIA).envios]
+    wa = WhatsAppSemModelo()
+    res, _ = _enviar_tudo(engine, wa)
+    n_a = versoes.count("A")
+    assert n_a >= 1
+    assert res.falhas == n_a and res.enviados == len(versoes) - n_a
+    assert wa.tentativas.count("pesquisa_a") == 1  # não insiste com os outros clientes da versão A
+    assert res.falhas_por_versao == {"A": n_a}
+    assert f"{n_a} com erro (A: {n_a})" in res.resumo
+    assert res.erros_diferentes == [res.erros[0]] and "pesquisa_a" in res.erros[0]
+    falhou = [e for e in servico.obter_lista(engine, DIA).envios if e["versao"] == "A"]
+    assert all(e["enviado_em"] is None and "132001" in e["erro"] for e in falhou)
+
+
+# --------------------------------------------------------------------------- conversa e resposta automática
+AUTOMATICAS = ["Agradeço seu contato. Como posso ajudar?",
+               "Agradeço sua mensagem. Não estou disponível no momento, mas responderei assim que possível."]
+
+
+def test_resposta_automatica_nao_tem_resposta_sugerida(engine):
+    _enviar_tudo(engine)
+    _receber(engine, AUTOMATICAS[0], wa_id="wamid.a1", quando=AGORA - timedelta(hours=2))
+    _receber(engine, AUTOMATICAS[1], wa_id="wamid.a2", quando=AGORA - timedelta(hours=1))
+    wa = WhatsAppFalso()
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=8, estimada=True)), agora=AGORA,
+                                  enviar_texto=wa.enviar_texto, resposta_automatica=True)
+    r = _resposta(engine)
+    assert r.nota == 8 and r.nota_estimada and r.resposta_sugerida == ""
+    assert r.status == respostas.REVISAR and respostas.MOTIVO_AUTOMATICA in r.motivo_revisao
+    assert wa.textos == []  # nunca sai sozinha
+
+
+def test_eh_resposta_automatica():
+    assert respostas.eh_resposta_automatica(AUTOMATICAS)
+    assert respostas.eh_resposta_automatica(["Olá! Obrigado pelo contato. Em que posso ajudar?"])
+    assert not respostas.eh_resposta_automatica(["Agradeço o contato! A picanha estava ótima"] + ["nota 10"])
+    assert not respostas.eh_resposta_automatica(["Tudo ótimo, obrigada!"])
+    assert not respostas.eh_resposta_automatica([])
+
+
+def test_cartao_mostra_pesquisa_nossa_resposta_e_segunda_mensagem(engine):
+    _enviar_tudo(engine)
+    wa = WhatsAppFalso()
+    _receber(engine, "nota 9", wa_id="wamid.c1", quando=AGORA - timedelta(hours=3))
+    r = _resposta(engine)
+    respostas.enviar_resposta(engine, r.id, "Obrigada, João!", wa.enviar_texto, agora=AGORA - timedelta(hours=2))
+    _receber(engine, "de nada!", wa_id="wamid.c2", quando=AGORA + timedelta(minutes=1))
+    linha = next(x for x in respostas.listar(engine, DIA, DIA) if x["id"] == r.id)
+    tipos = [(c["direcao"], c.get("numero"), c.get("depois_da_nossa")) for c in linha["conversa"]]
+    assert tipos == [("pesquisa", None, None), ("entrada", 1, False), ("saida", None, None), ("entrada", 2, True)]
+    assert linha["conversa"][0]["texto"].startswith("Oi")
+    assert linha["mensagens_do_cliente"] == 2

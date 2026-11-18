@@ -163,3 +163,21 @@ def test_nao_enviar_mostra_nome_e_telefone_completo(ambiente):
     _logar(c)
     html = c.get("/nao-enviar").get_data(as_text=True)
     assert "Camila" in html and "(11) 90000-0025" in html and "(11) 90000-0099" in html
+
+
+def test_cartao_de_resposta_mostra_a_pesquisa_e_a_segunda_mensagem(ambiente):
+    from posvenda import respostas
+    app, engine, _ = ambiente
+    dia = date(2026, 10, 2)
+    servico.gerar_lista(engine, dia, lambda i, f: sessoes_de_02_10(), hoje=HOJE)
+    e = servico.obter_lista(engine, dia).envios[0]
+    servico.marcar_enviado(engine, e["id"])
+    quando = datetime.now(timezone.utc)
+    respostas.registrar_recebida(engine, e["telefone"], "Agradeço seu contato. Como posso ajudar?", "wamid.w1", quando)
+    respostas.registrar_recebida(engine, e["telefone"], "Não estou disponível no momento.", "wamid.w2", quando)
+    c = app.test_client()
+    _logar(c)
+    html = c.get(f"/respostas?data={dia.isoformat()}").get_data(as_text=True)
+    assert "Nós · pesquisa enviada em" in html
+    assert "Cliente · 2ª mensagem" in html
+    assert e["telefone"] not in html
