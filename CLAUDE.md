@@ -42,7 +42,10 @@ Sistema **separado** do painel de gestão (barsp-gestao): não importar código 
 - Respostas objetivas. Elogio: agradecer. Reclamação: pedir desculpas e a última frase pede uma nova oportunidade
   (trava `termina_com_nova_oportunidade`); nunca pedir para o cliente explicar nem chamar no privado (trava
   `_PEDE_EXPLICACAO`) (Emerson, 29/10/2026). Nunca agradecer pelas estrelas, pela nota ou pela avaliação: agradecer
-  pela preferência, visita ou escolha (trava `_AGRADECE_ESTRELAS`, Emerson, 14/11/2026). **Nunca** cupom, desconto, brinde,
+  pela preferência, visita ou escolha (trava `_AGRADECE_ESTRELAS`, Emerson, 14/11/2026). As respostas não podem ser
+  iguais (Emerson, 18/11/2026): a IA recebe as 30 últimas publicadas (`avaliacoes.respostas_recentes`) e um molde por
+  avaliação (`avaliacoes.JEITOS`, pelo id); se sair parecida demais com uma publicada (`parecida_com`: texto ≥ 72% igual
+  ou o mesmo fechamento), tenta de novo uma vez e, se continuar, vai para "Revisar antes de publicar". **Nunca** cupom, desconto, brinde,
   cortesia, reembolso ou nada grátis: trava `_COMPENSACAO` em `avaliacoes.py`, vale também na publicação manual.
 - 4 e 5 estrelas sem alerta saem sozinhas (`GOOGLE_RESPOSTA_AUTOMATICA`, ligada por padrão a pedido do Emerson;
   `=0` desliga). 1 a 3 estrelas, sem estrelas, assunto grave (`_GRAVE`), pedido de dono pela IA ou qualquer trava

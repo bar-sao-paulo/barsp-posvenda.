@@ -106,7 +106,10 @@ def test_cliente_editou_a_avaliacao_refaz_a_sugestao(engine):
 def test_elogio_sai_sozinho(engine):
     g = GoogleFalso()
     A.sincronizar(engine, [av("x", estrelas=5), av("y", estrelas=4, comentario="")], agora=AGORA)
-    res = A.responder_pendentes(engine, respondedor(), responder_google=g.responder, automatica=True, agora=AGORA)
+    textos = {"x": "Valeu demais, Ana! Que bom que curtiu o chopp. Volte sempre!\n— Equipe Bar São Paulo",
+              "y": "Que alegria receber você! A mesa fica esperando pela próxima.\n— Equipe Bar São Paulo"}
+    res = A.responder_pendentes(engine, lambda a: A.Sugestao(textos[a["review_id"]], "elogio", False, ""),
+                                responder_google=g.responder, automatica=True, agora=AGORA)
     assert res.publicadas == 2 and len(g.publicadas) == 2
     t = _todas(engine)["x"]
     assert t["situacao"] == A.PUBLICADA and t["publicada_por"] == "automático" and t["resposta_google"]
@@ -430,3 +433,63 @@ def test_elogio_que_agradece_as_estrelas_nao_sai_sozinho(engine):
 
 def test_prompt_pede_para_agradecer_a_preferencia():
     assert "preferência" in A.SISTEMA and "Nunca agradeça pelas estrelas" in A.SISTEMA
+
+
+# --------------------------------------------------------------------------- regra de 18/11/2026
+LUIZ = "Obrigado pela preferência, Luiz! Volte sempre, a casa é sua.\n— Equipe Bar São Paulo"
+JOAO = "Valeu pela preferência, João! Volte sempre, a casa é sua.\n— Equipe Bar São Paulo"
+DIFERENTE = "Que alegria ter você com a gente, João! Te esperamos para o próximo chopp.\n— Equipe Bar São Paulo"
+
+
+def test_parecida_com_resposta_recente():
+    assert A.parecida_com(JOAO, [LUIZ]) == LUIZ
+    assert A.parecida_com(DIFERENTE, [LUIZ]) == ""
+    assert A.parecida_com("Oba, João! Obrigado por vir. Volte sempre, a casa é sua.", [LUIZ]) == LUIZ  # mesmo fecho
+
+
+def test_ia_recebe_as_publicadas_e_um_jeito(engine):
+    A.sincronizar(engine, [av("x", estrelas=5, comentario="")], agora=AGORA)
+    with engine.begin() as con:
+        con.execute(A.tab.update().where(A.tab.c.review_id == "x").values(situacao=A.PUBLICADA, resposta_google=LUIZ,
+                                                                           publicada_em=AGORA))
+    A.sincronizar(engine, [av("y", estrelas=5, comentario="")], agora=AGORA)
+    pedidos = []
+
+    def responder(a):
+        pedidos.append(a)
+        return A.Sugestao(DIFERENTE, "elogio", False, "")
+    g = GoogleFalso()
+    A.responder_pendentes(engine, responder, responder_google=g.responder, automatica=True, agora=AGORA)
+    contexto = A.montar_contexto(pedidos[0])
+    assert "Volte sempre, a casa é sua." in contexto and "<jeito>" in contexto
+    assert len(g.publicadas) == 1
+
+
+def test_resposta_igual_tenta_de_novo_e_publica_a_diferente(engine):
+    A.sincronizar(engine, [av("x", estrelas=5, comentario=""), av("y", estrelas=5, comentario="")], agora=AGORA)
+    saidas = iter([LUIZ, JOAO, DIFERENTE])
+    pedidos = []
+
+    def responder(a):
+        pedidos.append(a)
+        return A.Sugestao(next(saidas), "elogio", False, "")
+    g = GoogleFalso()
+    res = A.responder_pendentes(engine, responder, responder_google=g.responder, automatica=True, agora=AGORA)
+    assert res.publicadas == 2 and len(pedidos) == 3 and pedidos[2]["evitar"] == LUIZ
+    assert "<atencao>" in A.montar_contexto(pedidos[2])
+
+
+def test_resposta_que_continua_igual_vai_para_revisao(engine):
+    A.sincronizar(engine, [av("x", estrelas=5, comentario=""), av("y", estrelas=5, comentario="")], agora=AGORA)
+    saidas = iter([LUIZ, JOAO, JOAO])
+    g = GoogleFalso()
+    A.responder_pendentes(engine, lambda a: A.Sugestao(next(saidas), "elogio", False, ""),
+                          responder_google=g.responder, automatica=True, agora=AGORA)
+    t = _todas(engine)
+    assert len(g.publicadas) == 1 and t["y"]["situacao"] == A.REVISAR
+    assert "parecida" in t["y"]["motivo_revisao"]
+
+
+def test_jeitos_mudam_de_uma_avaliacao_para_outra():
+    assert A.jeito_para({"id": 1}) != A.jeito_para({"id": 2})
+    assert "NÃO podem ser iguais" in A.SISTEMA
