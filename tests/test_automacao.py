@@ -749,3 +749,43 @@ def test_modelo_inexistente_para_de_tentar_e_mostra_versao(engine):
     assert res.erros_diferentes == [res.erros[0]] and "pesquisa_a" in res.erros[0]
     falhou = [e for e in servico.obter_lista(engine, DIA).envios if e["versao"] == "A"]
     assert all(e["enviado_em"] is None and "132001" in e["erro"] for e in falhou)
+
+
+# --------------------------------------------------------------------------- conversa e resposta automática
+AUTOMATICAS = ["Agradeço seu contato. Como posso ajudar?",
+               "Agradeço sua mensagem. Não estou disponível no momento, mas responderei assim que possível."]
+
+
+def test_resposta_automatica_nao_tem_resposta_sugerida(engine):
+    _enviar_tudo(engine)
+    _receber(engine, AUTOMATICAS[0], wa_id="wamid.a1", quando=AGORA - timedelta(hours=2))
+    _receber(engine, AUTOMATICAS[1], wa_id="wamid.a2", quando=AGORA - timedelta(hours=1))
+    wa = WhatsAppFalso()
+    respostas.processar_pendentes(engine, ClaudeFalso(analise(nota=8, estimada=True)), agora=AGORA,
+                                  enviar_texto=wa.enviar_texto, resposta_automatica=True)
+    r = _resposta(engine)
+    assert r.nota == 8 and r.nota_estimada and r.resposta_sugerida == ""
+    assert r.status == respostas.REVISAR and respostas.MOTIVO_AUTOMATICA in r.motivo_revisao
+    assert wa.textos == []  # nunca sai sozinha
+
+
+def test_eh_resposta_automatica():
+    assert respostas.eh_resposta_automatica(AUTOMATICAS)
+    assert respostas.eh_resposta_automatica(["Olá! Obrigado pelo contato. Em que posso ajudar?"])
+    assert not respostas.eh_resposta_automatica(["Agradeço o contato! A picanha estava ótima"] + ["nota 10"])
+    assert not respostas.eh_resposta_automatica(["Tudo ótimo, obrigada!"])
+    assert not respostas.eh_resposta_automatica([])
+
+
+def test_cartao_mostra_pesquisa_nossa_resposta_e_segunda_mensagem(engine):
+    _enviar_tudo(engine)
+    wa = WhatsAppFalso()
+    _receber(engine, "nota 9", wa_id="wamid.c1", quando=AGORA - timedelta(hours=3))
+    r = _resposta(engine)
+    respostas.enviar_resposta(engine, r.id, "Obrigada, João!", wa.enviar_texto, agora=AGORA - timedelta(hours=2))
+    _receber(engine, "de nada!", wa_id="wamid.c2", quando=AGORA + timedelta(minutes=1))
+    linha = next(x for x in respostas.listar(engine, DIA, DIA) if x["id"] == r.id)
+    tipos = [(c["direcao"], c.get("numero"), c.get("depois_da_nossa")) for c in linha["conversa"]]
+    assert tipos == [("pesquisa", None, None), ("entrada", 1, False), ("saida", None, None), ("entrada", 2, True)]
+    assert linha["conversa"][0]["texto"].startswith("Oi")
+    assert linha["mensagens_do_cliente"] == 2

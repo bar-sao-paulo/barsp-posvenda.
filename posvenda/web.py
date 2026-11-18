@@ -715,7 +715,7 @@ textarea{min-height:92px;resize:vertical}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--bd);font-size:14px}
 .linha{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .erro{color:var(--al)}.critico{border-left:5px solid var(--al)}.atencao{border-left:5px solid #d9a400}.positivo{border-left:5px solid var(--ac)}
-.fala{background:#f1efe9;border-radius:8px;padding:8px 10px;white-space:pre-wrap}
+.fala{background:#f1efe9;border-radius:8px;padding:8px 10px;white-space:pre-wrap}.fala.nossa{background:#e6f2ec;margin-left:24px}
 select{font:inherit;padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fff}
 .topo-resp{display:flex;gap:14px;flex-wrap:wrap;justify-content:space-between;align-items:flex-start}
 .filtros{display:grid;gap:8px}.nps{border:1px solid var(--bd);border-radius:10px;padding:10px 14px;min-width:220px;max-width:320px}
@@ -819,11 +819,13 @@ function abrir(id, tel) {
 <span class="quieto">{{ r.prato or 'seu pedido' }} · {{ ver_telefone(r.envio_id, r.telefone) }} · 🛒 {{ r.historico }}</span></div>
 {% if r.itens %}<p class="quieto"><b>Consumiu:</b> {{ r.itens }}</p>{% endif %}
 <div class="linha"><span class="tag">{{ r.status }}</span>{% if r.nota is not none %}<strong>{{ r.gravidade }} · nota {{ r.nota }}{{ ' (estimada)' if r.nota_estimada }}</strong>{% endif %}</div>
-{% for f in r.falas %}{% if f.direcao == 'equipe' %}<div class="fala"><span class="quieto">No áudio (escrito pela equipe):</span> {{ f.texto }}</div>
+{% for f in r.conversa %}{% if f.direcao == 'pesquisa' %}<div class="fala nossa"><span class="quieto">Nós · pesquisa enviada em {{ f.criado_em.astimezone(tz).strftime('%d/%m %H:%M') }}:</span> {{ f.texto }}</div>
+{% elif f.direcao == 'saida' %}<div class="fala nossa"><span class="quieto">Nós · resposta enviada em {{ f.criado_em.astimezone(tz).strftime('%d/%m %H:%M') }}:</span> {{ f.texto }}</div>
+{% elif f.direcao == 'equipe' %}<div class="fala"><span class="quieto">No áudio (escrito pela equipe):</span> {{ f.texto }}</div>
 {% elif f.direcao == 'transcrito' %}<div class="fala"><span class="quieto">No áudio (transcrição automática, confira ouvindo):</span> {{ f.texto }}</div>
-{% elif f.midia_id and f.midia_tipo == 'audio' %}<div class="fala">🎤 Áudio{% if wa_ok %} <audio controls preload="none" src="{{ url_for('midia', mensagem_id=f.id) }}"></audio>{% endif %}</div>
-{% elif f.midia_id and f.midia_tipo == 'image' %}<div class="fala">📷 Foto{% if wa_ok %} <a href="{{ url_for('midia', mensagem_id=f.id) }}" target="_blank" rel="noopener">abrir</a>{% endif %}{{ f.texto[6:] }}</div>
-{% else %}<div class="fala">{{ f.texto }}</div>{% endif %}{% endfor %}
+{% else %}<div class="fala">{% if r.mensagens_do_cliente > 1 or f.depois_da_nossa %}<span class="quieto">Cliente · {{ f.numero }}ª mensagem{{ ', depois da nossa resposta' if f.depois_da_nossa }} · {{ f.criado_em.astimezone(tz).strftime('%d/%m %H:%M') }}:</span><br>{% endif %}{% if f.midia_id and f.midia_tipo == 'audio' %}🎤 Áudio{% if wa_ok %} <audio controls preload="none" src="{{ url_for('midia', mensagem_id=f.id) }}"></audio>{% endif %}
+{% elif f.midia_id and f.midia_tipo == 'image' %}📷 Foto{% if wa_ok %} <a href="{{ url_for('midia', mensagem_id=f.id) }}" target="_blank" rel="noopener">abrir</a>{% endif %}{{ f.texto[6:] }}
+{% else %}{{ f.texto }}{% endif %}</div>{% endif %}{% endfor %}
 {% if r.audio_pendente %}<form method="post" action="{{ url_for('respostas_audio', resposta_id=r.id) }}" class="cli">
 <input type="hidden" name="csrf" value="{{ session['csrf'] }}">{{ periodo }}
 <textarea name="texto" aria-label="O que o cliente disse no áudio" placeholder="Ouça o áudio e escreva aqui o que o cliente disse. A IA refaz a nota e a resposta."></textarea>
@@ -833,7 +835,7 @@ function abrir(id, tel) {
 {% if r.acao_sugerida %}<p><b>Ação sugerida:</b> {{ r.acao_sugerida }}</p>{% endif %}
 {% if r.status in (R.REVISAR, R.PODE_ENVIAR) %}<form method="post" action="{{ url_for('respostas_enviar', resposta_id=r.id) }}" class="cli">
 <input type="hidden" name="csrf" value="{{ session['csrf'] }}">{{ periodo }}
-<textarea name="texto" aria-label="Resposta">{{ r.resposta_sugerida }}</textarea>
+<textarea name="texto" aria-label="Resposta"{% if not r.resposta_sugerida %} placeholder="Sem resposta sugerida. Se quiser responder mesmo assim, escreva aqui."{% endif %}>{{ r.resposta_sugerida }}</textarea>
 <div class="linha">{% if wa_ok %}<button>Enviar resposta</button>{% endif %}
 <button class="btn2" formaction="{{ url_for('respostas_ignorar', resposta_id=r.id) }}">Não responder</button></div></form>
 {% elif r.status == R.RESPONDIDO %}<p class="ok">✓ Respondido: {{ r.resposta_sugerida }}</p>{% endif %}
