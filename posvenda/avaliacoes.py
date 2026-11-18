@@ -19,6 +19,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
 
@@ -159,7 +160,12 @@ nem se o cliente pedir.
 - Nunca invente horário, preço, prato, promoção, telefone ou endereço. Nunca diga quantas vezes o cliente veio.
 - No máximo 1 emoji, e nenhum em reclamação.
 - Proibido: "prezado cliente", "lamentamos o transtorno", "infelizmente", "conforme", "informamos que", \
-linguagem de robô ou de call center. As respostas são lidas juntas no Google: não repita sempre as mesmas frases.
+linguagem de robô ou de call center.
+- As respostas são lidas juntas no Google e NÃO podem ser iguais (Emerson, 18/11/2026). Em <ja_publicadas> estão as \
+respostas mais recentes da casa: não repita a abertura, o agradecimento, a estrutura nem o fechamento de nenhuma \
+delas (ex.: se já saiu "Obrigado pela preferência, Luiz! Volte sempre, a casa é sua.", não escreva "Valeu pela \
+preferência, João! Volte sempre, a casa é sua."). Trocar só o nome ou uma palavra não basta: mude a frase inteira. \
+Siga o jeito pedido em <jeito>.
 
 precisa_dono = true quando o comentário tiver ofensa, ameaça, acusação grave (intoxicação, bicho na comida, \
 discriminação, furto, briga, cobrança indevida, ação judicial) ou parecer falso, spam ou de concorrente. Nesses casos \
@@ -190,15 +196,82 @@ class Sugestao:
     motivo_dono: str
 
 
+# Moldes diferentes para cada avaliação (pela ordem do id), para as respostas não saírem iguais.
+JEITOS = (
+    "Comece pelo nome e uma frase de alegria por ter recebido a pessoa. Agradeça a preferência no meio. "
+    "Feche com um convite para o próximo chopp ou a próxima refeição.",
+    "Comece agradecendo a escolha pelo Bar São Paulo (sem usar a palavra \"preferência\"). "
+    "Feche dizendo que a equipe espera a pessoa de volta em breve.",
+    "Comece com uma saudação curta e calorosa (\"Que alegria\", \"Que bom\", \"Oba\") e o nome. "
+    "Agradeça a visita. Feche desejando uma boa semana ou um bom fim de semana.",
+    "Uma frase só, direta, agradecendo por ter vindo e chamando para voltar, sem \"volte sempre\".",
+    "Comece dizendo que a equipe ficou feliz com a visita. Agradeça o carinho. "
+    "Feche com \"Até a próxima!\" ou parecido.",
+    "Comece pelo agradecimento (\"Muito obrigado por escolher a gente\", \"Obrigado por vir\") e o nome. "
+    "Feche dizendo que a mesa está esperando ou que a casa está de portas abertas.",
+    "Comece com o nome e uma frase sobre o clima do bar (boa conversa, boa comida, chopp gelado), sem inventar "
+    "prato. Agradeça a preferência no fim.",
+)
+
+
+def jeito_para(av: dict[str, Any]) -> str:
+    return JEITOS[int(av.get("id") or 0) % len(JEITOS)]
+
+
 def montar_contexto(av: dict[str, Any]) -> str:
     estrelas = int(av.get("estrelas") or 0)
-    return "\n".join([
+    linhas = [
         "<avaliacao>",
         f"Autor: {av.get('autor') or 'anônimo'}",
         f"Estrelas: {estrelas if estrelas else 'não informadas'} de 5",
         f"Comentário: {av.get('comentario') or '(só estrelas, sem comentário)'}",
         "</avaliacao>",
-    ])
+        f"<jeito>{av.get('jeito') or jeito_para(av)}</jeito>",
+        "<ja_publicadas>",
+        *[f"- {' '.join(t.split())}" for t in av.get("respostas_recentes") or []],
+        "</ja_publicadas>",
+    ]
+    if av.get("evitar"):
+        linhas.append(f"<atencao>A resposta anterior ficou parecida demais com esta, já publicada: "
+                      f"{' '.join(av['evitar'].split())} Escreva outra bem diferente.</atencao>")
+    return "\n".join(linhas)
+
+
+# --------------------------------------------------------------------------- respostas que não se repetem
+def _molde(texto: str) -> str:
+    """Texto sem assinatura, sem acento e sem pontuação, para comparar respostas."""
+    linhas = [l for l in (texto or "").splitlines() if l.strip() and not l.strip().startswith(("—", "-"))]
+    return " ".join(re.sub(r"[^a-z0-9 ]+", " ", lista.sem_acento(" ".join(linhas))).split())
+
+
+def _ultima_frase(texto: str) -> str:
+    linhas = [l for l in (texto or "").splitlines() if l.strip() and not l.strip().startswith(("—", "-"))]
+    frases = [f for f in re.split(r"(?<=[.!?])\s+", " ".join(linhas).strip()) if f.strip()]
+    return _molde(frases[-1]) if frases else ""
+
+
+def parecida_com(texto: str, recentes: Iterable[str], limite: float = 0.72) -> str:
+    """A resposta recente com que esta se parece demais (mesmo texto com outro nome, mesmo fechamento), ou ""."""
+    molde, fim = _molde(texto), _ultima_frase(texto)
+    if not molde:
+        return ""
+    for r in recentes:
+        outro = _molde(r)
+        if not outro:
+            continue
+        if SequenceMatcher(None, molde, outro).ratio() >= limite:
+            return r
+        if fim and len(fim.split()) >= 3 and fim == _ultima_frase(r):
+            return r
+    return ""
+
+
+def respostas_recentes(engine: Engine, limite: int = 30) -> list[str]:
+    """Respostas que a casa publicou no Google (mais novas primeiro)."""
+    with engine.connect() as con:
+        return [r.resposta_google for r in con.execute(
+            select(tab.c.resposta_google).where(tab.c.situacao == PUBLICADA, tab.c.resposta_google != "")
+            .order_by(tab.c.publicada_em.desc()).limit(limite)) if r.resposta_google]
 
 
 def _ler(texto: str) -> Sugestao:
@@ -372,13 +445,23 @@ def responder_pendentes(engine: Engine, responder: Responder | None, *,
         q = q.where(tab.c.id.in_(somente))
     with engine.connect() as con:
         pendentes = [dict(r._mapping) for r in con.execute(q.order_by(tab.c.criada_em).limit(limite))]
+    recentes = respostas_recentes(engine)
     for av in pendentes:
+        pedido = {**av, "respostas_recentes": recentes, "jeito": jeito_para(av)}
         try:
-            sug = responder(av)
+            sug = responder(pedido)
+            igual = parecida_com(sug.resposta, recentes)
+            if igual:  # uma segunda tentativa, avisando a IA do que ficou igual
+                sug = responder({**pedido, "evitar": igual})
+                igual = parecida_com(sug.resposta, recentes)
             texto = sug.resposta
             motivos = motivos_para_revisar(av, texto, sug.precisa_dono, sug.motivo_dono)
+            if igual:
+                motivos.append("parecida demais com uma resposta já publicada")
         except IAErro as exc:
             texto, motivos = "", [f"falha da IA: {exc}"]
+        if texto:
+            recentes = [texto, *recentes][:30]
         if not motivos and automatica and responder_google is not None:
             try:
                 _publicar(engine, av, texto, responder_google, agora, "automático")
