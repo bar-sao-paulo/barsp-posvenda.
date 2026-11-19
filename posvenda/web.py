@@ -151,7 +151,7 @@ def criar_app(engine=None, buscar_sessoes=None, usuario: str | None = None, senh
 
     @app.before_request
     def _csrf_e_login():
-        if request.endpoint in ("webhook_verificar", "webhook_receber", "api_resumo"):
+        if request.endpoint in ("webhook_verificar", "webhook_receber", "api_resumo", "api_reputacao"):
             return None  # chamado pela Meta (assinatura) ou pelo painel financeiro (token): sem login nem CSRF
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
