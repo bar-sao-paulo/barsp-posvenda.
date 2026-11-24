@@ -27,11 +27,11 @@ TZ = ZoneInfo("America/Sao_Paulo")
 
 VERSOES = {
     "A": "{oi} Aqui é a Thais, do Bar São Paulo :) Como foi sua experiência com {prato} {quando}? "
-         "Sua opinião é muito importante para nós, e é rapidinho!",
+         "De 0 a 10, que nota você dá? É rapidinho!",
     "B": "{oi} Aqui é a Thais, do Bar São Paulo :) De 0 a 10, qual nota você dá para sua experiência com "
          "{prato} {quando}? Se quiser contar algum detalhe, fico no aguardo!",
     "C": "{oi} Aqui é a Thais, do Bar São Paulo :) Passando para saber como foi sua experiência com {prato} "
-         "{quando}. Tem alguma coisa que a gente poderia fazer ainda melhor? Sua opinião é muito importante para nós!",
+         "{quando}. De 0 a 10, que nota você dá? E se tiver algo que a gente possa melhorar, me conta!",
 }
 
 MOTIVO_IFOOD = "Pedido do iFood (o iFood não passa o telefone)"

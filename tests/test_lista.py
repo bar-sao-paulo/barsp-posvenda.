@@ -71,7 +71,7 @@ def test_prato_principal_so_bebida_vira_seu_pedido():
 def test_mensagens_das_versoes():
     a = lista.montar_mensagem("A", "João", "Picanha Cheff", DIA, HOJE)
     assert a == ("Oi, João! Aqui é a Thais, do Bar São Paulo :) Como foi sua experiência com a picanha cheff ontem? "
-                 "Sua opinião é muito importante para nós, e é rapidinho!")
+                 "De 0 a 10, que nota você dá? É rapidinho!")
     b = lista.montar_mensagem("B", None, None, DIA, HOJE)
     assert b.startswith("Oi! Aqui é a Thais") and "experiência com seu pedido ontem?" in b
     c = lista.montar_mensagem("C", "Camila", "Salada Caesar", DIA, date(2026, 10, 5))
